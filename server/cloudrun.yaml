@@ -1,0 +1,27 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: silver-scout-ai-proxy
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "100"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/container-concurrency: "80"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/silver-scout-prod/api-proxy:latest
+        resources:
+          limits:
+            memory: 1Gi
+            cpu: 1000m
+        ports:
+        - containerPort: 3001

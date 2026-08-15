@@ -1,0 +1,47 @@
+config {
+  type: "incremental",
+  schema: "silver_scout_analytics",
+  name: "leads_clean",
+  description: "Deduplicated state business registry leads with permit drop velocity calculation",
+  bigquery: {
+    partitionBy: "DATE(ingested_at)",
+    clusterBy: ["trade_industry", "exit_propensity_score"]
+  }
+}
+
+WITH raw_registrations AS (
+  SELECT
+    LOWER(TRIM(business_name)) AS name_clean,
+    trade_industry,
+    location,
+    permit_volume_2023_2025,
+    permit_volume_2026,
+    SAFE_DIVIDE(
+      (permit_volume_2023_2025 / 3.0) - permit_volume_2026,
+      (permit_volume_2023_2025 / 3.0)
+    ) * 100.0 AS permit_drop_calculated,
+    registration_year,
+    CURRENT_TIMESTAMP() AS ingested_at
+  FROM
+    ${ref("stg_state_business_registry")}
+)
+
+SELECT
+  GENERATE_UUID() AS lead_id,
+  INITCAP(name_clean) AS business_name,
+  trade_industry,
+  location,
+  permit_volume_2023_2025,
+  permit_volume_2026,
+  ROUND(permit_drop_calculated, 1) AS permit_drop_pct,
+  CASE
+    WHEN permit_drop_calculated >= 45.0 THEN 9
+    WHEN permit_drop_calculated >= 30.0 THEN 8
+    WHEN permit_drop_calculated >= 15.0 THEN 6
+    ELSE 4
+  END AS exit_propensity_score,
+  registration_year,
+  ingested_at
+FROM
+  raw_registrations
+QUALIFY ROW_NUMBER() OVER(PARTITION BY name_clean, location ORDER BY ingested_at DESC) = 1

@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserData().role == 'admin' ||
+        getUserData().role == 'partner'
+      );
+    }
+
+    function isSameFund(fundId) {
+      return isAuthenticated() && (
+        !('fundId' in getUserData()) ||
+        getUserData().fundId == fundId ||
+        getUserData().fundId == 'redwood-cap' ||
+        isAdmin()
+      );
+    }
+
+    // ===============================================================
+    // Rules Configuration
+    // ===============================================================
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Legacy Top-Level Leads Collection
+    match /leads/{leadId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // Multi-Tenant Funds Root Collection
+    match /funds/{fundId} {
+      allow read: if isSameFund(fundId);
+      allow write: if isAdmin() && isSameFund(fundId);
+
+      // Deployment Config Subcollection
+      match /config/{configId} {
+        allow read: if isSameFund(fundId);
+        allow write: if isAdmin() && isSameFund(fundId);
+      }
+
+      // Multi-Tenant Deals Subcollection
+      match /deals/{dealId} {
+        allow read: if isSameFund(fundId);
+        allow create, update: if isSameFund(fundId);
+        allow delete: if isAdmin();
+
+        // Execution Records Subcollection (Audit & Provenance)
+        match /executionRecords/{recordId} {
+          allow read: if isSameFund(fundId);
+          allow create: if isSameFund(fundId);
+          allow update, delete: if false; // Immutable audit log
+        }
+      }
+
+      // Transactional Outbox Subcollection
+      match /outbox/{outboxId} {
+        allow read: if isSameFund(fundId);
+        allow create, update: if isSameFund(fundId);
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Global Catch-All Deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

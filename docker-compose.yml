@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

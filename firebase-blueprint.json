@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "Lead": {
+      "title": "Lead",
+      "description": "A potential acquisition target business.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "industry": { "type": "string" },
+        "location": { "type": "string" },
+        "registrationDate": { "type": "string", "format": "date" },
+        "agentName": { "type": "string" },
+        "isCorporateAgent": { "type": "boolean" },
+        "permitVolume2023_2025": { "type": "number" },
+        "permitVolume2026": { "type": "number" },
+        "permitDrop": { "type": "number" },
+        "lastDigitalPostDate": { "type": "string", "format": "date" },
+        "reviewVelocity": { "type": "number" },
+        "exitPropensityScore": { "type": "number" },
+        "aiThesis": { "type": "string" },
+        "valuationEstimate": { "type": "number" },
+        "status": { "type": "string", "enum": ["new", "qualified", "outreach_triggered", "in_loi", "archived"] },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "socialLinks": {
+          "type": "object",
+          "properties": {
+            "linkedin": { "type": "string" },
+            "twitter": { "type": "string" },
+            "website": { "type": "string" }
+          }
+        },
+        "permitAnalysis": { "type": "string" },
+        "archiveReason": { "type": "string", "enum": ["Not a fit", "Contacted Unsuccessfully", "Inactive", "Other"] },
+        "thesisFeedback": {
+          "type": "object",
+          "properties": {
+            "rating": { "type": "number" },
+            "comment": { "type": "string" },
+            "createdAt": { "type": "string", "format": "date-time" }
+          },
+          "required": ["rating", "createdAt"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["name", "industry", "createdAt", "createdBy"]
+    },
+    "User": {
+      "title": "User",
+      "description": "App user profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "industryMultiples": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "valuationParameters": {
+          "type": "object",
+          "properties": {
+            "defaultProfitMargin": { "type": "number" },
+            "revenueTiers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "min": { "type": "number" },
+                  "max": { "type": "number" },
+                  "multiplier": { "type": "number" }
+                },
+                "required": ["min", "max", "multiplier"]
+              }
+            }
+          }
+        }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Collection of business leads."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles."
+    }
+  }
+}
