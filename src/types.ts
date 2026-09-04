@@ -16,6 +16,40 @@ export type DealStage =
 // Legacy alias compatibility
 export type LeadStatus = 'new' | 'analyzing' | 'qualified' | 'outreach_triggered' | 'in_loi' | 'under_contract' | 'archived' | DealStage;
 
+export type DealSourceChannel = 
+  | 'OFF_MARKET_SCOUT' 
+  | 'ON_MARKET_LISTING' 
+  | 'INBOUND_INTEREST';
+
+export interface ListingDetails {
+  sourcePlatform: 'BizBuySell' | 'Axial' | 'BusinessesForSale' | 'Transworld' | 'Sunbelt' | 'DirectBroker' | 'Other';
+  listingId?: string;
+  listingUrl?: string;
+  askingPrice?: number;
+  cashFlowOrSde?: number;
+  daysOnMarket?: number;
+  priceDropPct?: number; // e.g. 15 for 15% price cut
+  isBlindTeaser?: boolean;
+  brokerName?: string;
+  brokerFirm?: string;
+  brokerEmail?: string;
+  matchedEntityId?: string;
+  matchConfidence?: number; // 0-100% confidence matching blind listing to registered entity
+  teaserSummary?: string;
+}
+
+export interface InboundInterestDetails {
+  submissionChannel: 'VALUATION_PORTAL' | 'BROKER_SUBMISSION' | 'INTERMEDIARY_REFERRAL' | 'DIRECT_EMAIL';
+  founderName: string;
+  founderEmail: string;
+  founderPhone?: string;
+  targetTimeline: 'IMMEDIATE_0_3M' | 'SHORT_3_6M' | 'MEDIUM_6_12M' | 'EXPLORING';
+  saleReason: 'RETIREMENT' | 'BURNOUT_HEALTH' | 'PARTNERSHIP_SPLIT' | 'GROWTH_RECAP' | 'OTHER';
+  sellerExpectedValuation?: number;
+  urgencyScore: number; // 1-10
+  notes?: string;
+}
+
 export interface FundDeploymentConfig {
   fundId: string;
   fundName: string;
@@ -121,6 +155,12 @@ export interface Lead {
     website?: string;
   };
   permitAnalysis?: string;
+  
+  // Multi-Channel Deal Flow & Ingestion Metadata
+  dealSourceChannel?: DealSourceChannel;
+  listingDetails?: ListingDetails;
+  inboundInterestDetails?: InboundInterestDetails;
+
   createdAt: string;
   updatedAt: string;
   createdBy: string;

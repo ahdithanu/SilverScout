@@ -51,7 +51,11 @@ import {
   Phone,
   ShieldCheck,
   Layers,
-  SearchCheck
+  SearchCheck,
+  Network,
+  Compass,
+  Store,
+  HeartHandshake
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -70,11 +74,19 @@ import { PresenceAvatars } from './components/common/PresenceAvatars';
 import { DealComments } from './components/common/DealComments';
 import { OperatorControlPanel } from './components/operator/OperatorControlPanel';
 import { parseFinancialStatementText } from './utils/pdfParser';
+import { KnowledgeGraphView } from './components/graph/KnowledgeGraphView';
+import { GraphRagConsole } from './components/intelligence/GraphRagConsole';
+import { TerritoryMap } from './components/territory/TerritoryMap';
+import { PipelineKanban } from './components/dashboard/PipelineKanban';
+import { ICTeaserModal } from './components/modals/ICTeaserModal';
+import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
+import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
 
 import { 
   auth, 
   db, 
   loginWithGoogle, 
+  loginWithGoogleRedirect,
   logout, 
   handleFirestoreError, 
   OperationType 
@@ -210,7 +222,7 @@ const Card = ({ children, className, onClick }: { children: React.ReactNode, cla
   </div>
 );
 
-export { cn, Button, Badge, Card, formatStatusLabel };
+export { cn, Button, Badge, Card };
 export type { ICMemoData, LOITerms, ExtractedFinancials, DigitalHealthScan, OutreachSequence };
 
 // --- Main App ---
@@ -220,7 +232,57 @@ export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'ingestion' | 'intelligence' | 'outreach' | 'settings'>('dashboard');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      const loginPromise = loginWithGoogle();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('AUTH_TIMEOUT')), 35000)
+      );
+      await Promise.race([loginPromise, timeoutPromise]);
+    } catch (err: any) {
+      console.error("Google Auth error:", err);
+      const code = err?.code || '';
+      const message = err?.message || '';
+
+      if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
+        setAuthError(
+          `Domain "${window.location.hostname}" is not authorized for OAuth in Firebase Console. Please add "${window.location.hostname}" to Firebase Console → Authentication → Settings → Authorized Domains, or click "Enter in Demo Operator Mode" below to proceed immediately.`
+        );
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError("Sign-in popup was blocked by your browser. Please allow popups for this site, try 'Sign in with Redirect', or use Demo Operator Mode.");
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthError("Sign-in popup was closed before completing.");
+      } else if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
+        setAuthError("Google Sign-In is not enabled in Firebase Console → Authentication → Sign-in method. Please turn it ON, or click 'Enter in Demo Operator Mode'.");
+      } else if (message === 'AUTH_TIMEOUT') {
+        setAuthError("Sign-in timed out. Please try 'Sign in with Redirect' or click 'Enter in Demo Operator Mode'.");
+      } else {
+        setAuthError(`Sign-in error: ${message || code || 'Unable to connect to Google Auth'}. You can click "Enter in Demo Operator Mode" below.`);
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleRedirectLogin = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      await loginWithGoogleRedirect();
+    } catch (err: any) {
+      console.error("Redirect login error:", err);
+      setAuthError(`Redirect login error: ${err?.message || 'Unable to redirect'}. Use Demo Operator Mode below.`);
+      setIsLoggingIn(false);
+    }
+  };
+  const [activeTab, setActiveTab] = useState<
+    'dashboard' | 'ingestion' | 'intelligence' | 'ontology' | 'graph-rag' | 'territory' | 'analytics' | 'outreach' | 'operator' | 'settings'
+  >('dashboard');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [useThinkingMode, setUseThinkingMode] = useState(false);
@@ -279,10 +341,17 @@ export default function App() {
   const [outreachFilter, setOutreachFilter] = useState<'all' | 'pending' | 'triggered'>('all');
   const [isBatchTriggering, setIsBatchTriggering] = useState(false);
 
-  // Dashboard & Pipeline View Modes (List, Kanban, Map)
-  const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'kanban' | 'map'>('list');
+  // Dashboard & Pipeline View Modes (List, Kanban, M&A Pipeline, Map)
+  const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'kanban' | 'pipeline' | 'map'>('list');
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
   const [mapSelectedLead, setMapSelectedLead] = useState<Lead | null>(null);
+  const [graphRagInitialQuery, setGraphRagInitialQuery] = useState<string>('');
+  const [icTeaserLead, setIcTeaserLead] = useState<Lead | null>(null);
+
+  // Multi-Channel Deal Flow & Ingestion State
+  const [isInboundPortalOpen, setIsInboundPortalOpen] = useState(false);
+  const [ingestionChannelTab, setIngestionChannelTab] = useState<'off_market' | 'on_market' | 'inbound'>('off_market');
+  const [dashboardChannelFilter, setDashboardChannelFilter] = useState<'all' | 'off_market' | 'on_market' | 'inbound'>('all');
 
   // Global Error & Toast State
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -547,6 +616,13 @@ export default function App() {
     const locLower = (location || '').toLowerCase().trim();
     if (cityCoordinatesMap[locLower]) {
       return cityCoordinatesMap[locLower];
+    }
+    const matchedKey = Object.keys(cityCoordinatesMap).find(k => {
+      const cityNameOnly = k.split(',')[0].trim();
+      return locLower.includes(cityNameOnly) || cityNameOnly.includes(locLower);
+    });
+    if (matchedKey) {
+      return cityCoordinatesMap[matchedKey];
     }
     let hash = 0;
     for (let i = 0; i < (id + location).length; i++) {
@@ -951,48 +1027,89 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
 
   // Auth & Profile Sync
   useEffect(() => {
+    // Safety fallback: ensure app never hangs indefinitely on initialization splash screen
+    const splashTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 1200);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      clearTimeout(splashTimeout);
       setUser(firebaseUser);
       if (firebaseUser) {
-        const userDoc = doc(db, 'users', firebaseUser.uid);
-        const snap = await getDoc(userDoc);
-        if (!snap.exists()) {
-          const newProfile: UserProfile = {
+        try {
+          const userDoc = doc(db, 'users', firebaseUser.uid);
+          const snap = await Promise.race([
+            getDoc(userDoc),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('FIRESTORE_FETCH_TIMEOUT')), 1500)
+            )
+          ]);
+          if (!snap.exists()) {
+            const newProfile: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              displayName: firebaseUser.displayName || 'Partner',
+              role: 'partner',
+              industryMultiples: {},
+              valuationParameters: {
+                defaultProfitMargin: 20,
+                revenueTiers: []
+              }
+            };
+            try {
+              await setDoc(userDoc, newProfile);
+            } catch (writeErr) {
+              console.warn("Could not save initial profile to Firestore:", writeErr);
+            }
+            setProfile(newProfile);
+          } else {
+            const data = snap.data() as UserProfile;
+            setProfile(data);
+            if (data.valuationParameters?.defaultProfitMargin) {
+              setDefaultProfitMargin(data.valuationParameters.defaultProfitMargin.toString());
+            }
+          }
+        } catch (fetchErr) {
+          console.warn("Could not load user profile from Firestore, using in-memory profile:", fetchErr);
+          setProfile({
             uid: firebaseUser.uid,
             email: firebaseUser.email || '',
-            displayName: firebaseUser.displayName || 'User',
-            role: 'user',
+            displayName: firebaseUser.displayName || 'Partner',
+            role: 'partner',
             industryMultiples: {},
             valuationParameters: {
               defaultProfitMargin: 20,
               revenueTiers: []
             }
-          };
-          await setDoc(userDoc, newProfile);
-          setProfile(newProfile);
-        } else {
-          const data = snap.data() as UserProfile;
-          setProfile(data);
-          if (data.valuationParameters?.defaultProfitMargin) {
-            setDefaultProfitMargin(data.valuationParameters.defaultProfitMargin.toString());
-          }
+          });
+        } finally {
+          setLoading(false);
         }
       } else {
         setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
-    return unsubscribe;
+    return () => {
+      clearTimeout(splashTimeout);
+      unsubscribe();
+    };
   }, []);
 
   // Leads Sync
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.uid.startsWith('demo-')) return;
     const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const leadsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lead));
-      setLeads(leadsData);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'leads'));
+      setLeads(prev => {
+        const firestoreIds = new Set(leadsData.map(l => l.id));
+        const pendingLocal = prev.filter(l => !firestoreIds.has(l.id));
+        return [...leadsData, ...pendingLocal];
+      });
+    }, (err) => {
+      console.warn("Firestore leads sync warning (gracefully bypassed):", err);
+    });
     return unsubscribe;
   }, [user]);
 
@@ -1013,9 +1130,18 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
       const matchesTags = tagSearch === '' || 
         (l.tags || []).some(t => t.toLowerCase().includes(tagSearch.toLowerCase()));
 
-      return matchesSearch && matchesScore && matchesPermitDrop && matchesYear && matchesTags;
+      let matchesChannel = true;
+      if (dashboardChannelFilter === 'off_market') {
+        matchesChannel = !l.dealSourceChannel || l.dealSourceChannel === 'OFF_MARKET_SCOUT';
+      } else if (dashboardChannelFilter === 'on_market') {
+        matchesChannel = l.dealSourceChannel === 'ON_MARKET_LISTING';
+      } else if (dashboardChannelFilter === 'inbound') {
+        matchesChannel = l.dealSourceChannel === 'INBOUND_INTEREST';
+      }
+
+      return matchesSearch && matchesScore && matchesPermitDrop && matchesYear && matchesTags && matchesChannel;
     });
-  }, [leads, searchQuery, minScore, maxScore, minPermitDrop, regYear, tagSearch]);
+  }, [leads, searchQuery, minScore, maxScore, minPermitDrop, regYear, tagSearch, dashboardChannelFilter]);
 
   const stats = useMemo(() => {
     const highPropensity = leads.filter(l => l.exitPropensityScore >= 8).length;
@@ -1118,11 +1244,11 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
   };
 
   const handleIngestSample = async () => {
-    if (!user) return;
+    const creatorId = user?.uid || 'demo-partner-1';
     const sampleLeads: Partial<Lead>[] = [
       {
         name: "Manteca HVAC Solutions",
-        industry: "HVAC",
+        industry: "HVAC & Mechanical",
         location: "Manteca, CA",
         registrationDate: "2002-05-14",
         agentName: "Robert Miller",
@@ -1132,13 +1258,24 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         permitDrop: 73,
         lastDigitalPostDate: "2023-11-20",
         reviewVelocity: 0.2,
-        status: 'new',
+        revenue: 3400000,
+        ebitda: 748000,
+        profitMargin: 22,
+        valuationEstimate: 3366000,
+        exitPropensityScore: 8.8,
+        fundId: 'redwood-cap',
+        dealSourceChannel: 'OFF_MARKET_SCOUT',
+        status: 'qualified',
+        tags: ['Off-Market', 'Permit Contraction', 'Retirement Candidate'],
+        aiThesis: "Proprietary acquisition target in Manteca, CA. 24 years operating history under founder Robert Miller. 73% permit contraction signals urgent owner fatigue; clean 22% EBITDA makes this an ideal tuck-in candidate.",
+        aiStrengths: ['24-year continuous municipal brand presence', 'Clean 22% EBITDA margin ($748k clean cash flow)', 'Zero active digital ad spend or marketing'],
+        aiWeaknesses: ['73% permit contraction indicating operational deceleration', 'High founder key-man reliance'],
         createdAt: new Date().toISOString(),
-        createdBy: user.uid,
+        createdBy: creatorId,
       },
       {
         name: "San Jose Precision Plumbing",
-        industry: "Plumbing",
+        industry: "Commercial Plumbing",
         location: "San Jose, CA",
         registrationDate: "1998-03-22",
         agentName: "Law Offices of Smith & Co",
@@ -1148,13 +1285,24 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         permitDrop: 4,
         lastDigitalPostDate: "2026-03-01",
         reviewVelocity: 4.5,
+        revenue: 6800000,
+        ebitda: 1428000,
+        profitMargin: 21,
+        valuationEstimate: 6426000,
+        exitPropensityScore: 5.2,
+        fundId: 'redwood-cap',
+        dealSourceChannel: 'OFF_MARKET_SCOUT',
         status: 'new',
+        tags: ['Off-Market', 'Corporate Agent', 'Stable Volume'],
+        aiThesis: "Corporate-managed plumbing operation with stable permit flow and active modern marketing. Low seller fatigue; candidate for secondary consolidation at market multiple.",
+        aiStrengths: ['High revenue scale ($6.8M) with stable commercial accounts', 'Strong digital presence with 4.5 reviews/month'],
+        aiWeaknesses: ['Corporate agent with institutional ownership structure', 'Low exit urgency; minimal discount opportunity'],
         createdAt: new Date().toISOString(),
-        createdBy: user.uid,
+        createdBy: creatorId,
       },
       {
         name: "Central Valley Tool & Die",
-        industry: "Manufacturing",
+        industry: "Precision Machining",
         location: "Stockton, CA",
         registrationDate: "1985-08-10",
         agentName: "Gary Thompson",
@@ -1164,41 +1312,121 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         permitDrop: 83,
         lastDigitalPostDate: "2021-05-12",
         reviewVelocity: 0.1,
-        status: 'new',
+        revenue: 4200000,
+        ebitda: 1008000,
+        profitMargin: 24,
+        valuationEstimate: 4536000,
+        exitPropensityScore: 9.4,
+        fundId: 'redwood-cap',
+        dealSourceChannel: 'OFF_MARKET_SCOUT',
+        status: 'qualified',
+        tags: ['Off-Market', 'Critical Fatigue', 'Single Owner'],
+        aiThesis: "Critical off-market machining candidate in Stockton, CA. 41 years in operation. 83% drop in commercial activity with dormant digital presence (last post 2021). High probability of founder retirement without internal successor.",
+        aiStrengths: ['41-year defense/aerospace supply history', 'Superior 24% EBITDA margin ($1.01M cash flow)', 'Defensible proprietary tooling and facility'],
+        aiWeaknesses: ['Severe 83% permit and activity drop', 'Owner is sole point of contact for customer accounts'],
         createdAt: new Date().toISOString(),
-        createdBy: user.uid,
+        createdBy: creatorId,
       }
     ];
 
+    const newLeads: Lead[] = [];
     for (const lead of sampleLeads) {
-      await addDoc(collection(db, 'leads'), {
+      const fullLead = {
         ...lead,
         updatedAt: new Date().toISOString(),
-      });
+      };
+      if (user && !user.uid.startsWith('demo-')) {
+        try {
+          const docRef = await addDoc(collection(db, 'leads'), JSON.parse(JSON.stringify(fullLead)));
+          newLeads.push({ id: docRef.id, ...fullLead } as Lead);
+        } catch (err) {
+          console.warn("Firestore write fallback to local state:", err);
+          newLeads.push({ id: `sample-${Date.now()}-${Math.random().toString(36).substring(7)}`, ...fullLead } as Lead);
+        }
+      } else {
+        newLeads.push({ id: `sample-${Date.now()}-${Math.random().toString(36).substring(7)}`, ...fullLead } as Lead);
+      }
+    }
+    setLeads(prev => [...newLeads, ...prev]);
+    if (newLeads.length > 0) {
+      setSelectedLead(newLeads[0]);
     }
     setActiveTab('dashboard');
   };
 
   const handleCitySearch = async () => {
-    if (!citySearchQuery.trim() || !user) return;
+    if (!citySearchQuery.trim()) return;
     setIsSearchingCity(true);
     try {
       const results = await searchBusinessesByCity(citySearchQuery);
-      for (const res of results) {
-        await addDoc(collection(db, 'leads'), {
-          ...res,
-          status: 'new',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          createdBy: user.uid,
-        });
+      const newLeads: Lead[] = results.map((res, idx) => ({
+        id: `lead-${Date.now()}-${idx}-${Math.random().toString(36).substring(7)}`,
+        fundId: 'redwood-cap',
+        dealSourceChannel: 'OFF_MARKET_SCOUT',
+        ...res,
+        status: (res.exitPropensityScore && res.exitPropensityScore >= 8) ? ('qualified' as const) : ('new' as const),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy: user?.uid || 'demo-partner-1',
+      } as Lead));
+
+      // Instantly push leads to dashboard without waiting for Firestore network roundtrips
+      setLeads(prev => [...newLeads, ...prev]);
+      if (newLeads.length > 0) {
+        setSelectedLead(newLeads[0]);
       }
       setCitySearchQuery('');
       setActiveTab('dashboard');
+
+      // Background persist to Firestore only if user is authenticated with real Firebase Auth
+      if (user && !user.uid.startsWith('demo-')) {
+        Promise.allSettled(
+          newLeads.map(l => {
+            const cleanDoc = JSON.parse(JSON.stringify(l));
+            return addDoc(collection(db, 'leads'), cleanDoc);
+          })
+        ).catch(e => console.warn("Firestore background sync:", e));
+      }
     } catch (err) {
       console.error("City Search Error:", err);
     } finally {
       setIsSearchingCity(false);
+    }
+  };
+
+  const handleIngestMarketplaceListings = async (newListings: Lead[]) => {
+    // Instant optimistic state dispatch to dashboard
+    setLeads(prev => [...newListings, ...prev]);
+    if (newListings.length > 0) {
+      setSelectedLead(newListings[0]);
+    }
+    setActiveTab('dashboard');
+
+    // Background Firestore persistence
+    if (user) {
+      try {
+        await Promise.allSettled(
+          newListings.map(l => setDoc(doc(db, 'leads', l.id), l))
+        );
+      } catch (err) {
+        console.warn("Firestore sync skipped (safe in demo mode):", err);
+      }
+    }
+  };
+
+  const handleInboundLeadSubmit = async (newLead: Lead) => {
+    // Instant optimistic state dispatch to dashboard
+    setLeads(prev => [newLead, ...prev]);
+    setSelectedLead(newLead);
+    setActiveTab('dashboard');
+
+    // Background Firestore persistence
+    if (user) {
+      try {
+        await setDoc(doc(db, 'leads', newLead.id), newLead);
+      } catch (err) {
+        console.warn("Firestore sync skipped (safe in demo mode):", err);
+      }
     }
   };
 
@@ -1243,22 +1471,45 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         useFastMode
       );
       setGroundingSources(sources);
-      for (const res of results) {
-        if (res.id) {
-          const leadDoc = doc(db, 'leads', res.id);
-          await updateDoc(leadDoc, {
-            exitPropensityScore: res.exitPropensityScore,
-            aiThesis: res.aiThesis,
-            valuationEstimate: res.valuationEstimate,
-            permitAnalysis: res.permitAnalysis,
-            status: (res.exitPropensityScore || 0) >= 8 ? 'qualified' : 'new',
+
+      // Immediately update local state with Exit Propensity scores & valuations
+      setLeads(prev => prev.map(l => {
+        const update = results.find(r => r.id === l.id);
+        if (update) {
+          return {
+            ...l,
+            exitPropensityScore: update.exitPropensityScore,
+            aiThesis: update.aiThesis,
+            valuationEstimate: update.valuationEstimate,
+            permitAnalysis: update.permitAnalysis,
+            status: (update.exitPropensityScore || 0) >= 8 ? 'qualified' : l.status,
             updatedAt: new Date().toISOString(),
-          });
+          };
+        }
+        return l;
+      }));
+
+      // Background persist to Firestore
+      for (const res of results) {
+        if (res.id && !res.id.startsWith('lead-') && !res.id.startsWith('sample-')) {
+          try {
+            const leadDoc = doc(db, 'leads', res.id);
+            await updateDoc(leadDoc, {
+              exitPropensityScore: res.exitPropensityScore,
+              aiThesis: res.aiThesis,
+              valuationEstimate: res.valuationEstimate,
+              permitAnalysis: res.permitAnalysis,
+              status: (res.exitPropensityScore || 0) >= 8 ? 'qualified' : 'new',
+              updatedAt: new Date().toISOString(),
+            });
+          } catch (e) {
+            console.warn("Could not sync lead update to Firestore:", e);
+          }
         }
       }
       setActiveTab('dashboard');
     } catch (err) {
-      console.error(err);
+      console.error("Intelligence Analysis Error:", err);
     } finally {
       setIsAnalyzing(false);
     }
@@ -1594,10 +1845,16 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-zinc-50">
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-white">
         <div className="flex flex-col items-center gap-4">
           <div className="h-12 w-12 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
-          <p className="font-mono text-sm text-zinc-500">INITIALIZING SILVER SCOUT...</p>
+          <p className="font-mono text-sm tracking-wider text-emerald-400">INITIALIZING SILVER SCOUT...</p>
+          <button 
+            onClick={() => setLoading(false)}
+            className="mt-2 text-xs font-mono text-zinc-500 hover:text-zinc-300 underline transition-colors"
+          >
+            Entering pipeline workspace →
+          </button>
         </div>
       </div>
     );
@@ -1622,14 +1879,68 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
             <p className="text-zinc-400">Proprietary Lead-Gen Engine for "High-Propensity" Acquisition Targets.</p>
           </div>
           
+          {authError && (
+            <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-950/60 p-4 text-xs text-amber-200 text-left">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1.5 flex-1">
+                  <p className="font-bold text-amber-300">Authentication Note</p>
+                  <p className="leading-relaxed text-zinc-300">{authError}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <Button 
-            onClick={loginWithGoogle}
+            onClick={handleGoogleLogin}
+            disabled={isLoggingIn}
             className="w-full gap-3 py-6 text-lg"
             variant="primary"
           >
-            <Globe className="h-5 w-5" />
-            Authenticate with Google
+            {isLoggingIn ? (
+              <>
+                <Clock className="h-5 w-5 animate-spin text-emerald-400" />
+                Connecting to Google Auth...
+              </>
+            ) : (
+              <>
+                <Globe className="h-5 w-5" />
+                Authenticate with Google
+              </>
+            )}
           </Button>
+
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              disabled={isLoggingIn}
+              onClick={handleRedirectLogin}
+              className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 text-center text-xs font-semibold text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800 transition-colors"
+            >
+              Sign in with Redirect
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const demoUser = { uid: 'demo-partner-1', email: 'partner@silverscout.ai', displayName: 'PE Partner' } as any;
+                setUser(demoUser);
+                setProfile({
+                  uid: 'demo-partner-1',
+                  email: 'partner@silverscout.ai',
+                  displayName: 'PE Partner',
+                  role: 'partner',
+                  industryMultiples: {},
+                  valuationParameters: { defaultProfitMargin: 20, revenueTiers: [] }
+                });
+                if (leads.length === 0) {
+                  handleIngestSample();
+                }
+              }}
+              className="flex-1 rounded-lg border border-emerald-800/60 bg-emerald-950/50 px-3 py-2.5 text-center text-xs font-bold text-emerald-300 hover:border-emerald-600 hover:bg-emerald-900/60 transition-colors"
+            >
+              Demo Operator Mode →
+            </button>
+          </div>
           
           <div className="mt-8 grid grid-cols-3 gap-4 text-center">
             <div>
@@ -1659,12 +1970,12 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
           <span className="font-display text-xl font-bold tracking-tight">SILVER SCOUT</span>
         </div>
         
-        <nav className="flex-1 space-y-1 p-4">
+        <nav className="flex-1 space-y-1 p-4 overflow-y-auto">
           <button 
             onClick={() => setActiveTab('dashboard')}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              activeTab === 'dashboard' ? "bg-emerald-50 text-emerald-700" : "text-zinc-600 hover:bg-zinc-50"
+              activeTab === 'dashboard' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
             )}
           >
             <LayoutDashboard className="h-4 w-4" />
@@ -1674,7 +1985,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
             onClick={() => setActiveTab('ingestion')}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              activeTab === 'ingestion' ? "bg-emerald-50 text-emerald-700" : "text-zinc-600 hover:bg-zinc-50"
+              activeTab === 'ingestion' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
             )}
           >
             <Database className="h-4 w-4" />
@@ -1684,27 +1995,77 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
             onClick={() => setActiveTab('intelligence')}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              activeTab === 'intelligence' ? "bg-emerald-50 text-emerald-700" : "text-zinc-600 hover:bg-zinc-50"
+              activeTab === 'intelligence' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
             )}
           >
-            <BrainCircuit className="h-4 w-4" />
+            <BrainCircuit className="h-4 w-4 text-emerald-600" />
             Gemini Intelligence
+          </button>
+          <button 
+            onClick={() => setActiveTab('ontology')}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              activeTab === 'ontology' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
+            )}
+          >
+            <Network className="h-4 w-4 text-indigo-600" />
+            Deal Ontology Graph
+          </button>
+          <button 
+            onClick={() => setActiveTab('graph-rag')}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              activeTab === 'graph-rag' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
+            )}
+          >
+            <Sparkles className="h-4 w-4 text-purple-600" />
+            Graph-RAG Engine
+          </button>
+          <button 
+            onClick={() => setActiveTab('territory')}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              activeTab === 'territory' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
+            )}
+          >
+            <Compass className="h-4 w-4 text-blue-600" />
+            Territory Radar
+          </button>
+          <button 
+            onClick={() => setActiveTab('analytics')}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              activeTab === 'analytics' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
+            )}
+          >
+            <BarChart3 className="h-4 w-4 text-teal-600" />
+            Industry Analytics
           </button>
           <button 
             onClick={() => setActiveTab('outreach')}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              activeTab === 'outreach' ? "bg-emerald-50 text-emerald-700" : "text-zinc-600 hover:bg-zinc-50"
+              activeTab === 'outreach' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
             )}
           >
             <Send className="h-4 w-4" />
             Outreach Trigger
           </button>
           <button 
+            onClick={() => setActiveTab('operator')}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              activeTab === 'operator' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
+            )}
+          >
+            <ShieldCheck className="h-4 w-4 text-amber-600" />
+            Operator Control Plane
+          </button>
+          <button 
             onClick={() => setActiveTab('settings')}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              activeTab === 'settings' ? "bg-emerald-50 text-emerald-700" : "text-zinc-600 hover:bg-zinc-50"
+              activeTab === 'settings' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
             )}
           >
             <Settings className="h-4 w-4" />
@@ -1775,6 +2136,8 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
             >
               <Download className="h-4 w-4" />
               Download ZIP
+            </a>
+          </div>
         </header>
 
         {globalError && (
@@ -2062,6 +2425,57 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                     <p className="text-xs text-zinc-500">{filteredLeads.length} leads in active view</p>
                   </div>
 
+                  {/* Channel Filter Pills */}
+                  <div className="flex items-center gap-1 rounded-xl bg-zinc-100 p-1 border border-zinc-200 text-xs">
+                    <button
+                      onClick={() => setDashboardChannelFilter('all')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg font-bold transition-all",
+                        dashboardChannelFilter === 'all'
+                          ? "bg-white text-zinc-900 shadow-xs"
+                          : "text-zinc-500 hover:text-zinc-800"
+                      )}
+                    >
+                      All ({leads.length})
+                    </button>
+                    <button
+                      onClick={() => setDashboardChannelFilter('off_market')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1",
+                        dashboardChannelFilter === 'off_market'
+                          ? "bg-white text-emerald-700 shadow-xs"
+                          : "text-zinc-500 hover:text-zinc-800"
+                      )}
+                    >
+                      <Database className="h-3 w-3 text-emerald-600" />
+                      Off-Market ({leads.filter(l => !l.dealSourceChannel || l.dealSourceChannel === 'OFF_MARKET_SCOUT').length})
+                    </button>
+                    <button
+                      onClick={() => setDashboardChannelFilter('on_market')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1",
+                        dashboardChannelFilter === 'on_market'
+                          ? "bg-white text-purple-700 shadow-xs"
+                          : "text-zinc-500 hover:text-zinc-800"
+                      )}
+                    >
+                      <Store className="h-3 w-3 text-purple-600" />
+                      Listings ({leads.filter(l => l.dealSourceChannel === 'ON_MARKET_LISTING').length})
+                    </button>
+                    <button
+                      onClick={() => setDashboardChannelFilter('inbound')}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1",
+                        dashboardChannelFilter === 'inbound'
+                          ? "bg-white text-amber-700 shadow-xs"
+                          : "text-zinc-500 hover:text-zinc-800"
+                      )}
+                    >
+                      <HeartHandshake className="h-3 w-3 text-amber-600" />
+                      Inbound ({leads.filter(l => l.dealSourceChannel === 'INBOUND_INTEREST').length})
+                    </button>
+                  </div>
+
                   {/* View Mode Switcher Tabs */}
                   <div className="flex items-center gap-1 rounded-xl bg-zinc-100 p-1.5 ring-1 ring-zinc-200">
                     <button
@@ -2087,7 +2501,20 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                       )}
                     >
                       <Kanban className="h-3.5 w-3.5 text-emerald-600" />
-                      Kanban Board
+                      Status Board
+                    </button>
+
+                    <button
+                      onClick={() => setDashboardViewMode('pipeline')}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                        dashboardViewMode === 'pipeline'
+                          ? "bg-white text-zinc-900 shadow-sm font-bold"
+                          : "text-zinc-500 hover:text-zinc-800"
+                      )}
+                    >
+                      <Layers className="h-3.5 w-3.5 text-purple-600" />
+                      M&A Pipeline
                     </button>
 
                     <button
@@ -2125,7 +2552,23 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                             <div>
                               <div className="flex items-center gap-2">
                                 <h4 className="font-bold">{lead.name}</h4>
-                                 <Badge variant={
+                                {lead.dealSourceChannel === 'ON_MARKET_LISTING' ? (
+                                  <span className="rounded-md bg-purple-100 text-purple-800 border border-purple-200 px-2 py-0.5 text-[9px] font-bold flex items-center gap-1">
+                                    <Store className="h-2.5 w-2.5" />
+                                    {lead.listingDetails?.sourcePlatform || 'Listing'} ({lead.listingDetails?.daysOnMarket || 60}d)
+                                  </span>
+                                ) : lead.dealSourceChannel === 'INBOUND_INTEREST' ? (
+                                  <span className="rounded-md bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 text-[9px] font-bold flex items-center gap-1">
+                                    <HeartHandshake className="h-2.5 w-2.5" />
+                                    Inbound Founder
+                                  </span>
+                                ) : (
+                                  <span className="rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-[9px] font-semibold flex items-center gap-1">
+                                    <Database className="h-2.5 w-2.5" />
+                                    Off-Market
+                                  </span>
+                                )}
+                                <Badge variant={
                                   lead.status === 'qualified' ? 'success' : 
                                   lead.status === 'archived' ? 'danger' : 
                                   lead.status === 'outreach_triggered' ? 'info' : 
@@ -2299,7 +2742,44 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                   </div>
                 )}
 
-                {/* 3. INTERACTIVE MAP VIEW */}
+                {/* 3. M&A PIPELINE KANBAN (STAGE PROGRESSION) */}
+                {dashboardViewMode === 'pipeline' && (
+                  <div className="rounded-2xl bg-zinc-950 p-4 border border-zinc-800 shadow-2xl">
+                    <PipelineKanban
+                      leads={filteredLeads}
+                      userRole={profile?.role || 'partner'}
+                      onSelectLead={(lead) => setSelectedLead(lead)}
+                      onAdvanceLeadStage={async (leadId, _currentStage, nextStage) => {
+                        let mappedStatus: LeadStatus = 'qualified';
+                        if (nextStage === 'UNDER_EXCLUSIVITY') mappedStatus = 'under_contract';
+                        else if (nextStage === 'LOI_DRAFTED') mappedStatus = 'in_loi';
+                        else if (nextStage === 'APPROVED') mappedStatus = 'qualified';
+                        else if (nextStage === 'ENRICHED') mappedStatus = 'qualified';
+                        else mappedStatus = 'new';
+
+                        const updateData: any = { 
+                          currentState: nextStage, 
+                          status: mappedStatus, 
+                          updatedAt: new Date().toISOString() 
+                        };
+
+                        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...updateData } : l));
+                        if (selectedLead && selectedLead.id === leadId) {
+                          setSelectedLead(prev => prev ? { ...prev, ...updateData } : null);
+                        }
+
+                        try {
+                          const leadDoc = doc(db, 'leads', leadId);
+                          await updateDoc(leadDoc, updateData);
+                        } catch (err) {
+                          console.warn("Firestore update skipped (safe in demo mode):", err);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* 4. INTERACTIVE MAP VIEW */}
                 {dashboardViewMode === 'map' && (
                   <Card className="relative overflow-hidden p-0 border-zinc-300 shadow-md">
                     {/* Map Header & Controls */}
@@ -2420,17 +2900,136 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
           )}
 
           {activeTab === 'ingestion' && (
-            <div className="mx-auto max-w-2xl space-y-8">
+            <div className="mx-auto max-w-4xl space-y-8">
               <div className="text-center">
                 <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-100">
                   <Database className="h-8 w-8 text-zinc-600" />
                 </div>
-                <h3 className="text-2xl font-bold">Phase 1: Ingestion Pipeline</h3>
-                <p className="text-zinc-500">Targeting CA Secretary of State, County Permit Portals & Bulk Imports.</p>
+                <h3 className="text-2xl font-bold">Phase 1: Ingestion & Sourcing Engine</h3>
+                <p className="text-zinc-500">Multi-channel acquisition pipeline: Off-Market Registry, On-Market Listings & Inbound Inquiries.</p>
               </div>
 
-              {/* Bulk CSV Importer Card */}
-              <Card className="space-y-6 p-8 border-emerald-200/60 bg-gradient-to-br from-emerald-50/30 to-white">
+              {/* Sourcing Channel Selector */}
+              <div className="flex items-center justify-center">
+                <div className="flex items-center gap-1 rounded-2xl bg-zinc-100 p-1.5 border border-zinc-200 shadow-inner">
+                  <button
+                    onClick={() => setIngestionChannelTab('off_market')}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all",
+                      ingestionChannelTab === 'off_market'
+                        ? "bg-white text-zinc-900 shadow-sm"
+                        : "text-zinc-600 hover:text-zinc-900"
+                    )}
+                  >
+                    <Database className="h-3.5 w-3.5 text-emerald-600" />
+                    1. Off-Market Registry & Permits
+                  </button>
+                  <button
+                    onClick={() => setIngestionChannelTab('on_market')}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all",
+                      ingestionChannelTab === 'on_market'
+                        ? "bg-white text-zinc-900 shadow-sm font-bold"
+                        : "text-zinc-600 hover:text-zinc-900"
+                    )}
+                  >
+                    <Store className="h-3.5 w-3.5 text-purple-600" />
+                    2. On-Market Listing Feeds
+                  </button>
+                  <button
+                    onClick={() => setIngestionChannelTab('inbound')}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all",
+                      ingestionChannelTab === 'inbound'
+                        ? "bg-white text-zinc-900 shadow-sm font-bold"
+                        : "text-zinc-600 hover:text-zinc-900"
+                    )}
+                  >
+                    <HeartHandshake className="h-3.5 w-3.5 text-amber-600" />
+                    3. Inbound Founder Portal
+                  </button>
+                </div>
+              </div>
+
+              {/* CHANNEL 2: ON-MARKET LISTING AGGREGATOR */}
+              {ingestionChannelTab === 'on_market' && (
+                <ListingAggregatorCard
+                  existingLeads={leads}
+                  onIngestListings={handleIngestMarketplaceListings}
+                />
+              )}
+
+              {/* CHANNEL 3: INBOUND SELLER INTAKE PORTAL */}
+              {ingestionChannelTab === 'inbound' && (
+                <Card className="space-y-6 p-8 border-amber-200/60 bg-gradient-to-br from-amber-50/30 to-white shadow-md">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-100 pb-5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+                        <HeartHandshake className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-bold text-zinc-900">Inbound Sell-Side Founder Portal</h4>
+                        <p className="text-xs text-zinc-500">Capture warm founder submissions, broker teasers, and valuation inquiries.</p>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => setIsInboundPortalOpen(true)}
+                      className="gap-2 bg-amber-600 text-white hover:bg-amber-700 font-bold shadow-md"
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      Open Founder Intake Form
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="p-4 bg-white rounded-xl border border-zinc-100 shadow-xs">
+                      <p className="text-[10px] uppercase font-bold text-zinc-400">Channel Mode</p>
+                      <p className="text-sm font-black text-amber-700">Direct Founder Feed</p>
+                      <span className="text-[10px] text-zinc-500">Warm sell-side intent</span>
+                    </div>
+                    <div className="p-4 bg-white rounded-xl border border-zinc-100 shadow-xs">
+                      <p className="text-[10px] uppercase font-bold text-zinc-400">Automated Scoring</p>
+                      <p className="text-sm font-black text-emerald-700">Exit Urgency Engine</p>
+                      <span className="text-[10px] text-zinc-500">Retirement & Burnout weights</span>
+                    </div>
+                    <div className="p-4 bg-white rounded-xl border border-zinc-100 shadow-xs">
+                      <p className="text-[10px] uppercase font-bold text-zinc-400">Valuation Realism</p>
+                      <p className="text-sm font-black text-purple-700">Multiple Check</p>
+                      <span className="text-[10px] text-zinc-500">Benchmark vs 4.5x trade median</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 pt-2">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-zinc-600">Active Inbound Submissions ({leads.filter(l => l.dealSourceChannel === 'INBOUND_INTEREST').length})</h5>
+                    {leads.filter(l => l.dealSourceChannel === 'INBOUND_INTEREST').length === 0 ? (
+                      <div className="p-6 text-center border border-dashed border-zinc-200 rounded-xl text-xs text-zinc-400">
+                        No inbound founder inquiries yet. Click "Open Founder Intake Form" above to submit a live test valuation inquiry.
+                      </div>
+                    ) : (
+                      leads.filter(l => l.dealSourceChannel === 'INBOUND_INTEREST').map(l => (
+                        <div key={l.id} onClick={() => setSelectedLead(l)} className="cursor-pointer flex items-center justify-between p-3.5 rounded-xl bg-white border border-zinc-200 text-xs hover:border-amber-400 hover:shadow-xs transition-all">
+                          <div className="flex items-center gap-3">
+                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+                            <div>
+                              <p className="font-bold text-zinc-900">{l.name}</p>
+                              <p className="text-[10px] text-zinc-500">{l.agentName} • {l.location} • Timeline: {l.inboundInterestDetails?.targetTimeline?.replace(/_/g, ' ')}</p>
+                            </div>
+                          </div>
+                          <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                            Urgency {l.exitPropensityScore}/10
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              {/* CHANNEL 1: OFF-MARKET REGISTRY & PERMITS */}
+              {ingestionChannelTab === 'off_market' && (
+                <div className="space-y-6">
+                  {/* Bulk CSV Importer Card */}
+                  <Card className="space-y-6 p-8 border-emerald-200/60 bg-gradient-to-br from-emerald-50/30 to-white">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
@@ -2549,6 +3148,45 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                       Search
                     </Button>
                   </div>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[11px] font-semibold text-zinc-400">Quick Test Cities:</span>
+                    {['Stockton, CA', 'San Jose, CA', 'Fresno, CA', 'Austin, TX', 'Sacramento, CA'].map(quickCity => (
+                      <button
+                        key={quickCity}
+                        type="button"
+                        disabled={isSearchingCity}
+                        onClick={async () => {
+                          setCitySearchQuery(quickCity);
+                          setIsSearchingCity(true);
+                          try {
+                            const results = await searchBusinessesByCity(quickCity);
+                            const newLeads: Lead[] = results.map((res, idx) => ({
+                              id: `lead-${Date.now()}-${idx}-${Math.random().toString(36).substring(7)}`,
+                              fundId: 'redwood-cap',
+                              dealSourceChannel: 'OFF_MARKET_SCOUT',
+                              ...res,
+                              status: (res.exitPropensityScore && res.exitPropensityScore >= 8) ? ('qualified' as const) : ('new' as const),
+                              createdAt: new Date().toISOString(),
+                              updatedAt: new Date().toISOString(),
+                              createdBy: user?.uid || 'demo-partner-1',
+                            } as Lead));
+
+                            setLeads(prev => [...newLeads, ...prev]);
+                            if (newLeads.length > 0) {
+                              setSelectedLead(newLeads[0]);
+                            }
+                            setCitySearchQuery('');
+                            setActiveTab('dashboard');
+                          } finally {
+                            setIsSearchingCity(false);
+                          }
+                        }}
+                        className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
+                      >
+                        {quickCity}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="relative py-4">
@@ -2605,6 +3243,8 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
               </Card>
             </div>
           )}
+        </div>
+      )}
 
           {activeTab === 'intelligence' && (
             <div className="mx-auto max-w-2xl space-y-8">
@@ -2826,6 +3466,38 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                   </div>
                 )}
               </Card>
+            </div>
+          )}
+
+          {activeTab === 'ontology' && (
+            <div className="mx-auto max-w-7xl">
+              <KnowledgeGraphView
+                leads={leads}
+                onSelectLead={(lead) => setSelectedLead(lead)}
+                onNavigateToGraphRag={(query) => {
+                  if (query) setGraphRagInitialQuery(query);
+                  setActiveTab('graph-rag');
+                }}
+              />
+            </div>
+          )}
+
+          {activeTab === 'graph-rag' && (
+            <div className="mx-auto max-w-7xl">
+              <GraphRagConsole
+                leads={leads}
+                initialQuery={graphRagInitialQuery}
+                onSelectLead={(lead) => setSelectedLead(lead)}
+              />
+            </div>
+          )}
+
+          {activeTab === 'territory' && (
+            <div className="mx-auto max-w-7xl">
+              <TerritoryMap
+                leads={leads}
+                onSelectLead={(lead) => setSelectedLead(lead)}
+              />
             </div>
           )}
 
@@ -3814,7 +4486,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                         </div>
                       </div>
                     </div>
-                  ) : (
+                  ) : null}
                 </div>
 
                 {/* LBO Returns & SDE Add-Backs Modeler */}
@@ -4323,12 +4995,12 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                       </div>
                     )}
                   </section>
+                </div>
 
-                  <div className="pt-6 border-t border-zinc-200 space-y-6">
+              <div className="pt-6 border-t border-zinc-200 space-y-6">
                     <DealComments lead={selectedLead} profile={profile} onAddComment={handleAddComment} />
                     <ActivityTimeline logs={selectedLead.activityLogs} />
                   </div>
-                </div>
                 <div className="mt-12 flex flex-col sm:flex-row gap-3">
                   <Button 
                     className="flex-1 gap-2 bg-amber-600 text-white hover:bg-amber-700 font-bold"
@@ -4336,6 +5008,13 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                   >
                     <FileCheck2 className="h-4 w-4" />
                     Draft Non-Binding LOI
+                  </Button>
+                  <Button 
+                    className="flex-1 gap-2 bg-emerald-700 text-white hover:bg-emerald-800 font-bold"
+                    onClick={() => setIcTeaserLead(selectedLead)}
+                  >
+                    <Printer className="h-4 w-4" />
+                    IC Deal Teaser (PDF)
                   </Button>
                   <Button 
                     className="flex-1 gap-2 bg-zinc-900 text-white hover:bg-zinc-800"
@@ -4451,6 +5130,22 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
 
       {/* LP Equity Syndication & Waterfall Modeler Modal */}
       <SyndicationModelerModal isOpen={isSyndicationModalOpen} onClose={() => setIsSyndicationModalOpen(false)} />
+
+      {/* Standalone 1-Page IC Teaser Modal with PDF Export */}
+      {icTeaserLead && (
+        <ICTeaserModal 
+          lead={icTeaserLead} 
+          isOpen={Boolean(icTeaserLead)} 
+          onClose={() => setIcTeaserLead(null)} 
+        />
+      )}
+
+      {/* Inbound Sell-Side Founder Intake Portal Modal */}
+      <InboundSellerPortalModal
+        isOpen={isInboundPortalOpen}
+        onClose={() => setIsInboundPortalOpen(false)}
+        onSubmitLead={handleInboundLeadSubmit}
+      />
 
       {/* 1-Page Investment Committee (IC) Deal Teaser Modal */}
       <AnimatePresence>
@@ -4625,7 +5320,8 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                     </div>
 
                   </div>
-                ) : null}
+                </div>
+              ) : null}
               </motion.div>
             </div>
           )}

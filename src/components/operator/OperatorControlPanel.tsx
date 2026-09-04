@@ -312,7 +312,7 @@ export const OperatorControlPanel: React.FC<OperatorControlPanelProps> = ({
             </span>
             <span>x-correlation-id: req-9942a-8810</span>
           </div>
-          <p>[INFO] [fsm.ts] Deal deal-101 state transition INGESTED -> ENRICHED executed (1.2ms)</p>
+          <p>[INFO] [fsm.ts] Deal deal-101 state transition INGESTED -&gt; ENRICHED executed (1.2ms)</p>
           <p>[INFO] [financialGuard.ts] Deterministic EBITDA $600k verified against LLM memo output</p>
           <p>[INFO] [auditLedger.ts] Block #2 added to SHA-256 chain (Verified Integrity)</p>
           <p>[INFO] [outbox.ts] Outbox dispatch redwood-cap:deal-101:OUTREACH:v1 COMPLETED (SendGrid ID: sg-msg-88201)</p>

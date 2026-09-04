@@ -3,9 +3,11 @@
 > **Tier-1 Forward Deployed Engineering Portfolio Project**  
 > *Autonomous Deal-Sourcing, Financial OCR Underwriting, Deterministic AI Guardrails, and Operator Control Plane for Private Equity Search Funds acquiring Lower Middle Market Trade SMBs.*
 
-![Build Status](https://img.shields.io/badge/Tests-57%2F57%20Passed-emerald?style=for-the-badge&logo=node.js)
+![Build Status](https://img.shields.io/badge/Tests-72%2F72%20Passed-emerald?style=for-the-badge&logo=node.js)
 ![Architecture](https://img.shields.io/badge/Architecture-Control%20Plane-blue?style=for-the-badge&logo=typescript)
-![Security](https://img.shields.io/badge/Compliance-SEC%2017a--4%20%7C%20SOC2-purple?style=for-the-badge&logo=shield)
+![Multi-Channel](https://img.shields.io/badge/DealFlow-Hybrid%20Ingestion-amber?style=for-the-badge&logo=lightning)
+![Graph-RAG](https://img.shields.io/badge/Intelligence-Graph--RAG%20Ontology-purple?style=for-the-badge&logo=neo4j)
+![Security](https://img.shields.io/badge/Compliance-SEC%2017a--4%20%7C%20SOC2-emerald?style=for-the-badge&logo=shield)
 ![License](https://img.shields.io/badge/License-MIT-zinc?style=for-the-badge)
 
 ---
@@ -74,17 +76,40 @@ flowchart LR
 ### 8. 📄 Financial Document OCR & P&L Spreading Engine (`src/utils/pdfParser.ts`)
 - Regex-based document parser extracting Revenue, COGS, Gross Profit, Officer Compensation, Rent, and Personal Travel expenses to calculate Seller's Discretionary Earnings (SDE) and Adjusted EBITDA.
 
-### 9. 🗺️ Geospatial Driving Route Optimizer (`src/utils/geoRouting.ts`)
-- Haversine distance calculator and Travelling Salesperson Problem (TSP) nearest-neighbor algorithm generating optimized driving itineraries for physical deal scout visits.
+### 9. 🕸️ Deal Knowledge Graph & Multi-Hop Ontology (`src/types/graph.ts`, `src/utils/graphBuilder.ts`)
+- Deterministic deal ontology connecting `COMPANY`, `OWNER`, `TRADE`, `JURISDICTION`, and `PLATFORM` nodes.
+- **Hidden Cross-Ownership Detection**: Identifies shared registered agents and common managing principals across seemingly distinct entities (`SHARED_AGENT_WITH`).
+- **Tuck-In Synergy Scoring**: Quantifies operational synergies between targets and strategic platform roll-up vehicles (`TUCK_IN_SYNERGY`).
+- **Interactive Deal Explorer**: Force-directed SVG topology visualizer with entity filters, zoom/pan controls, and deep entity inspection (`src/components/graph/KnowledgeGraphView.tsx`).
+
+### 10. 🧠 Graph-RAG (Graph-Augmented Generation) Engine (`src/services/graphRagService.ts`)
+- **Topological Retrieval**: Performs keyword seed discovery and multi-hop expansion up to $N$ hops to extract targeted subgraphs.
+- **Topological Prompt Injection**: Synthesizes graph topology, shared-agent clusters, and platform vehicles into structured Gemini 2.5 prompts.
+- **Deterministic Topological Fallback**: Guarantees sub-second topological citations, multi-hop traversal paths, and PE recommendations even when external LLM APIs are offline.
+
+### 11. 🗺️ Geospatial Territory Radar & TSP Route Planner (`src/components/territory/TerritoryMap.tsx`)
+- Haversine distance calculator and Travelling Salesperson Problem (TSP) nearest-neighbor algorithm generating optimized turn-by-turn driving itineraries and Google Maps links for physical on-the-ground deal scout visits.
+
+### 12. 🏪 On-Market Business Listing Connectors & DOM Signals (`src/services/listingIngestionService.ts`)
+- **Marketplace Ingestion**: Integrates live listing feeds from BizBuySell, Axial, BusinessesForSale, Sunbelt, and Transworld broker networks.
+- **Listing Signal Engine**:
+  - `Days on Market (DOM)` fatigue multiplier (1.0x to 1.5x for listings >180 days).
+  - `Price Drop Velocity`: Detects seller price cuts (-10% to -20%) indicating willingness to negotiate.
+  - `Asking Multiple Spread`: Compares asking price against 4.5x trade median to pinpoint valuation arbitrage.
+- **AI Blind-Listing De-Anonymization**: Correlates confidential broker teasers against pre-indexed Secretary of State registry targets using municipality, vertical, revenue band, and vintage matching.
+
+### 13. 🤝 Inbound Sell-Side Founder Valuation Intake Portal (`src/components/modals/InboundSellerPortalModal.tsx`)
+- Shareable/public intake questionnaire for founders, business brokers, and advisory intermediaries.
+- **Exit Urgency Scoring Engine**: Evaluates founder retirement timeline, operational burnout/health, and valuation realism to prioritize warm deal flow.
 
 ---
 
-## 🧪 Automated Test Suite (57 / 57 PASSED)
+## 🧪 Automated Test Suite (72 / 72 PASSED)
 
-Silver Scout features a native TypeScript test runner ([`src/__tests__/run-tests.ts`](file:///Users/ahdithebomb/antigravity/Silver-Scout/src/__tests__/run-tests.ts)) testing source modules directly without intermediate build steps.
+Silver Scout features a native TypeScript test runner across all modules:
 
 ```bash
-./node_modules/.bin/tsx --test --test-reporter=spec src/__tests__/run-tests.ts
+./node_modules/.bin/tsx --test --test-reporter=spec src/__tests__/run-tests.ts src/__tests__/e2e-verification.ts src/__tests__/graph-rag.test.ts src/__tests__/listing-inbound.test.ts
 ```
 
 ### 📋 Test Coverage Breakdown
@@ -97,20 +122,27 @@ Silver Scout features a native TypeScript test runner ([`src/__tests__/run-tests
 | **Task Queue Manager** | Async task queue & benchmark 10,000 concurrent jobs in <50ms | `2 / 2` | ✅ PASS |
 | **Industry Benchmarks** | Trade baselines & lead percentile ranking calculations | `2 / 2` | ✅ PASS |
 | **CRM Webhook Integration**| HubSpot deal payload formatting & webhook push execution | `2 / 2` | ✅ PASS |
-| **Financial OCR Spreading**| Revenue, COGS, Net Income & SDE add-backs extraction from raw P&L | `1 / 1` | ✅ PASS |
-| **Geospatial Optimizer** | Haversine distance (~70 mi Sac to Modesto), radius filter & scout itinerary | `3 / 3` | ✅ PASS |
-| **BigQuery Data Warehouse**| Dataform SQL generation & propensity query formatting | `1 / 1` | ✅ PASS |
-| **White-Label Branding** | Hex color validation & fund configuration checks | `1 / 1` | ✅ PASS |
-| **Milestone 1: Multi-Tenant**| Deployment config structure & scoring weight sum validation | `3 / 3` | ✅ PASS |
-| **Milestone 2: FSM Lineage** | Sequential stage transitions, RBAC guards & execution audit records | `4 / 4` | ✅ PASS |
-| **Milestone 3: Outbox** | Deterministic idempotency keys, duplicate prevention & DLQ routing | `3 / 3` | ✅ PASS |
-| **Milestone 4: Financial Guard**| Pass realistic EBITDA multiples & reject hallucinated 50x LLM outputs | `2 / 2` | ✅ PASS |
-| **Milestone 5: Operator Panel**| Correlation trace logging (`x-correlation-id`) & tenant metadata | `1 / 1` | ✅ PASS |
-| **Milestone 6: SHA-256 Ledger**| Genesis block creation, hash chaining & cryptographic chain integrity | `2 / 2` | ✅ PASS |
-| **Milestone 7: Webhooks** | Process SendGrid email delivery & HubSpot CRM mutation webhooks | `2 / 2` | ✅ PASS |
-| **Milestone 8: LP Waterfall**| WACC, senior/mezz debt tranches & 4-tier distribution waterfall | `1 / 1` | ✅ PASS |
-| **Milestone 9: Outage Sim** | Provider outage fault injection, retry backoff & DLQ replay engine | `1 / 1` | ✅ PASS |
-| **TOTAL TEST SUITE** | **All Subsystems Verified** | **57 / 57** | **100% PASS** |
+| **Financial Document OCR** | Accurate regex parsing of Revenue, EBITDA, SDE add-backs | `1 / 1` | ✅ PASS |
+| **Geospatial & TSP Route** | Haversine distance calculation and driving route optimization | `3 / 3` | ✅ PASS |
+| **BigQuery & Dataform** | BigQuery SQL queries & Dataform ETL pipeline validation | `1 / 1` | ✅ PASS |
+| **White-Label Fund Branding**| Dynamic primary theme, hex code & firm logo injection | `1 / 1` | ✅ PASS |
+| **Multi-Tenant Config** | FundDeploymentConfig structure, scoring weights & validation | `3 / 3` | ✅ PASS |
+| **Finite State Machine** | Strict state transitions & immutable WorkflowExecutionRecords | `4 / 4` | ✅ PASS |
+| **Transactional Outbox** | Deterministic idempotency, deduplication & DLQ routing | `3 / 3` | ✅ PASS |
+| **Financial Assertion Guard**| Catches & rejects hallucinated multiples / purchase prices | `2 / 2` | ✅ PASS |
+| **Operator Observability** | Control plane telemetry, metric counters & correlation IDs | `1 / 1` | ✅ PASS |
+| **Cryptographic Audit Ledger**| SHA-256 hash chaining & tamper verification | `2 / 2` | ✅ PASS |
+| **Webhook Consumer Engine** | Inbound SendGrid & HubSpot webhook parsing | `2 / 2` | ✅ PASS |
+| **LP Waterfall Modeler** | Blended WACC & 4-tier distribution waterfall math | `1 / 1` | ✅ PASS |
+| **Provider Outage Simulator**| SendGrid HTTP 500 fault injection & DLQ replay engine | `1 / 1` | ✅ PASS |
+| **E2E City Search & Flow** | Real-world ingestion flow, permit drops & thesis generation | `2 / 2` | ✅ PASS |
+| **Deal Knowledge Graph** | Entity ontology, cross-ownership detection, synergy edges | `3 / 3` | ✅ PASS |
+| **Multi-Hop Subgraph Engine**| Targeted keyword seed expansion & multi-hop extraction | `1 / 1` | ✅ PASS |
+| **Graph-RAG Reasoning** | Deterministic topological citations, traversal & PE steps | `1 / 1` | ✅ PASS |
+| **Listing Signal Engine** | DOM fatigue, price drop deltas, and asking multiple spread | `3 / 3` | ✅ PASS |
+| **Blind De-Anonymization** | Municipal, vertical, revenue & vintage correlation matching | `2 / 2` | ✅ PASS |
+| **Inbound Founder Intake** | Urgency scoring, valuation realism penalty, and lead creation | `3 / 3` | ✅ PASS |
+| **TOTAL** | **Comprehensive Full System Verification** | **`72 / 72`** | **✅ PASS (100%)** |
 
 ---
 
