@@ -81,6 +81,7 @@ import { PipelineKanban } from './components/dashboard/PipelineKanban';
 import { ICTeaserModal } from './components/modals/ICTeaserModal';
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
+import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
 
 import { 
   auth, 
@@ -3247,14 +3248,24 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
       )}
 
           {activeTab === 'intelligence' && (
-            <div className="mx-auto max-w-2xl space-y-8">
+            <div className="mx-auto max-w-5xl space-y-8">
               <div className="text-center">
                 <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500/10">
                   <BrainCircuit className="h-8 w-8 text-emerald-600" />
                 </div>
-                <h3 className="text-2xl font-bold">Phase 2: Gemini Intelligence</h3>
-                <p className="text-zinc-500">AI-driven "Exit Propensity" ranking and investment thesis generation.</p>
+                <h3 className="text-2xl font-bold">Phase 2: Gemini Intelligence & Multi-Agent Sweeper</h3>
+                <p className="text-zinc-500">Autonomous distributed agent pipeline for exit propensity ranking, permit decay analysis, and LBO thesis generation.</p>
               </div>
+
+              {/* Multi-Agent Sweeper & Real-Time Telemetry Stream */}
+              <AgentTelemetrySweeper 
+                leads={leads}
+                isAnalyzing={isAnalyzing}
+                onRunIntelligence={handleRunIntelligence}
+                useThinkingMode={useThinkingMode}
+                useFastMode={useFastMode}
+                useFeedbackRefinement={useFeedbackRefinement}
+              />
               
               <Card className="space-y-6 p-8">
                 <div className="space-y-3">
