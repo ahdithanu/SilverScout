@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
+    "test": "tsx --test src/__tests__/run-tests.ts src/__tests__/e2e-verification.ts src/__tests__/graph-rag.test.ts src/__tests__/listing-inbound.test.ts src/__tests__/telemetry-sweeper.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -35,5 +36,12 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "optionalDependencies": {
+    "@tailwindcss/oxide-darwin-arm64": "4.2.2",
+    "@tailwindcss/oxide-darwin-x64": "4.2.2",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.2.2",
+    "@tailwindcss/oxide-linux-x64-musl": "4.2.2",
+    "@tailwindcss/oxide-linux-arm64-gnu": "4.2.2"
   }
 }
