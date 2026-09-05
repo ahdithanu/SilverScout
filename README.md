@@ -3,7 +3,7 @@
 > **Tier-1 Forward Deployed Engineering Portfolio Project**  
 > *Autonomous Deal-Sourcing, Financial OCR Underwriting, Deterministic AI Guardrails, and Operator Control Plane for Private Equity Search Funds acquiring Lower Middle Market Trade SMBs.*
 
-![Build Status](https://img.shields.io/badge/Tests-72%2F72%20Passed-emerald?style=for-the-badge&logo=node.js)
+![Build Status](https://img.shields.io/badge/Tests-76%2F76%20Passed-emerald?style=for-the-badge&logo=node.js)
 ![Architecture](https://img.shields.io/badge/Architecture-Control%20Plane-blue?style=for-the-badge&logo=typescript)
 ![Multi-Channel](https://img.shields.io/badge/DealFlow-Hybrid%20Ingestion-amber?style=for-the-badge&logo=lightning)
 ![Graph-RAG](https://img.shields.io/badge/Intelligence-Graph--RAG%20Ontology-purple?style=for-the-badge&logo=neo4j)
@@ -104,12 +104,12 @@ flowchart LR
 
 ---
 
-## 🧪 Automated Test Suite (72 / 72 PASSED)
+## 🧪 Automated Test Suite (76 / 76 PASSED)
 
 Silver Scout features a native TypeScript test runner across all modules:
 
 ```bash
-./node_modules/.bin/tsx --test --test-reporter=spec src/__tests__/run-tests.ts src/__tests__/e2e-verification.ts src/__tests__/graph-rag.test.ts src/__tests__/listing-inbound.test.ts
+npm test
 ```
 
 ### 📋 Test Coverage Breakdown
@@ -142,18 +142,19 @@ Silver Scout features a native TypeScript test runner across all modules:
 | **Listing Signal Engine** | DOM fatigue, price drop deltas, and asking multiple spread | `3 / 3` | ✅ PASS |
 | **Blind De-Anonymization** | Municipal, vertical, revenue & vintage correlation matching | `2 / 2` | ✅ PASS |
 | **Inbound Founder Intake** | Urgency scoring, valuation realism penalty, and lead creation | `3 / 3` | ✅ PASS |
-| **TOTAL** | **Comprehensive Full System Verification** | **`72 / 72`** | **✅ PASS (100%)** |
+| **Multi-Agent Sweeper** | 4-stage autonomous sweeper, permit contraction & telemetry | `4 / 4` | ✅ PASS |
+| **TOTAL** | **Comprehensive Full System Verification** | **`76 / 76`** | **✅ PASS (100%)** |
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Frontend**: React 18, TypeScript, TailwindCSS, Lucide Icons, Framer Motion
+- **Frontend**: React 19, TypeScript, TailwindCSS v4, Lucide Icons, Motion
 - **Backend Control Plane**: Node.js, Express, TypeScript, `tsx`
 - **Database & State**: Firebase Firestore, In-Memory State Store
 - **Data Warehouse**: Google Cloud BigQuery, Dataform SQLX
 - **AI & LLM**: Google Gemini 2.5 Flash API (`@google/genai`)
-- **Testing**: Node.js Native Test Runner (`node:test`, `node:assert`)
+- **Testing**: Node.js Native Test Runner (`node:test`, `node:assert` via `tsx --test`)
 
 ---
 
@@ -161,8 +162,8 @@ Silver Scout features a native TypeScript test runner across all modules:
 
 ### 1. Clone Repository & Install Dependencies
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/Silver-Scout.git
-cd Silver-Scout
+git clone https://github.com/ahdithanu/SilverScout.git
+cd SilverScout
 npm install
 ```
 
@@ -181,12 +182,13 @@ BIGQUERY_PROJECT_ID=your_gcp_project_id
 ```bash
 npm run dev
 ```
-- **Vite Frontend**: `http://localhost:5173`
+- **Vite Frontend**: `http://localhost:3000`
 - **Express Backend API**: `http://localhost:3001`
 
 ### 4. Run Automated Test Suite
 ```bash
-./node_modules/.bin/tsx --test --test-reporter=spec src/__tests__/run-tests.ts
+npm test
+```
 ```
 
 ---
