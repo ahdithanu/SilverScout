@@ -116,7 +116,9 @@ import { Lead, LeadStatus, UserProfile } from './types';
 import { 
   analyzeLeads, 
   generateSubjectLines, 
-  searchBusinessesByCity, 
+  searchBusinessesByCity,
+  searchBusinessesBatch,
+  BatchVolumeTier, 
   generateOutreachLetter, 
   generateICMemo, 
   ICMemoData, 
@@ -129,6 +131,7 @@ import {
   generateOutreachSequence,
   OutreachSequence
 } from './services/geminiService';
+import { REGISTRY_DATASETS, generateRegistryBatch } from './services/registryIngestionService';
 
 import { 
   BarChart, 
@@ -321,6 +324,8 @@ export default function App() {
   const [newAgeMultiplier, setNewAgeMultiplier] = useState('');
   const [citySearchQuery, setCitySearchQuery] = useState('');
   const [isSearchingCity, setIsSearchingCity] = useState(false);
+  const [batchVolumeTier, setBatchVolumeTier] = useState<BatchVolumeTier>('standard');
+  const [isIngestingRegistry, setIsIngestingRegistry] = useState<string | null>(null);
   const [editRevenue, setEditRevenue] = useState('');
   const [editEbitda, setEditEbitda] = useState('');
   const [editProfitMargin, setEditProfitMargin] = useState('');
@@ -1359,7 +1364,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
     if (!citySearchQuery.trim()) return;
     setIsSearchingCity(true);
     try {
-      const results = await searchBusinessesByCity(citySearchQuery);
+      const results = await searchBusinessesBatch(citySearchQuery, batchVolumeTier);
       const newLeads: Lead[] = results.map((res, idx) => ({
         id: `lead-${Date.now()}-${idx}-${Math.random().toString(36).substring(7)}`,
         fundId: 'redwood-cap',
@@ -1392,6 +1397,20 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
       console.error("City Search Error:", err);
     } finally {
       setIsSearchingCity(false);
+    }
+  };
+
+  const handleIngestRegistryBatch = (sourceId: string) => {
+    setIsIngestingRegistry(sourceId);
+    try {
+      const registryLeads = generateRegistryBatch(sourceId);
+      setLeads(prev => [...registryLeads, ...prev]);
+      if (registryLeads.length > 0) {
+        setSelectedLead(registryLeads[0]);
+      }
+      setActiveTab('dashboard');
+    } finally {
+      setIsIngestingRegistry(null);
     }
   };
 
@@ -3125,33 +3144,62 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
               </Card>
 
               <Card className="space-y-6 p-8">
-                <div className="space-y-2">
-                  <h4 className="font-bold">City-Specific Search</h4>
-                  <p className="text-sm text-zinc-500">Discover businesses in a specific city using Google Maps & Search.</p>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-bold text-zinc-900 text-base">City-Specific High-Volume Search</h4>
+                      <p className="text-sm text-zinc-500">Discover acquisition targets across any US city with multi-sector parallel crawlers.</p>
+                    </div>
+
+                    {/* Batch Volume Tier Selector */}
+                    <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1 text-xs">
+                      <span className="text-zinc-500 px-2 font-semibold text-[11px]">Batch Volume:</span>
+                      {[
+                        { id: 'standard', label: 'Standard (15)', desc: 'Single Query' },
+                        { id: 'deep_scan', label: 'Deep Scan (50)', desc: '4 Sectors' },
+                        { id: 'enterprise_blitz', label: 'Market Blitz (100+)', desc: '8 Sectors' }
+                      ].map(tier => (
+                        <button
+                          key={tier.id}
+                          type="button"
+                          onClick={() => setBatchVolumeTier(tier.id as BatchVolumeTier)}
+                          className={`rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
+                            batchVolumeTier === tier.id
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/60'
+                          }`}
+                        >
+                          {tier.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="flex gap-2">
                     <div className="relative flex-1">
                       <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                       <input 
                         type="text" 
-                        placeholder="Enter city (e.g. Stockton, CA)" 
+                        placeholder="Enter any US city (e.g. Dallas, TX, Atlanta, GA, Stockton, CA)..." 
                         value={citySearchQuery}
                         onChange={(e) => setCitySearchQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleCitySearch()}
-                        className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-10 pr-4 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        className="w-full rounded-lg border border-zinc-200 bg-white py-2.5 pl-10 pr-4 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-sm"
                       />
                     </div>
                     <Button 
                       onClick={handleCitySearch} 
                       disabled={isSearchingCity || !citySearchQuery.trim()}
-                      className="gap-2"
+                      className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5"
                     >
                       {isSearchingCity ? <Clock className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                      Search
+                      {isSearchingCity ? 'Scanning Sectors...' : `Scan ${batchVolumeTier === 'enterprise_blitz' ? '100+ Leads' : batchVolumeTier === 'deep_scan' ? '50 Leads' : 'City'}`}
                     </Button>
                   </div>
+
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <span className="text-[11px] font-semibold text-zinc-400">Quick Test Cities:</span>
-                    {['Stockton, CA', 'San Jose, CA', 'Fresno, CA', 'Austin, TX', 'Sacramento, CA'].map(quickCity => (
+                    {['Dallas, TX', 'Stockton, CA', 'Atlanta, GA', 'Austin, TX', 'Miami, FL', 'Sacramento, CA'].map(quickCity => (
                       <button
                         key={quickCity}
                         type="button"
@@ -3160,7 +3208,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                           setCitySearchQuery(quickCity);
                           setIsSearchingCity(true);
                           try {
-                            const results = await searchBusinessesByCity(quickCity);
+                            const results = await searchBusinessesBatch(quickCity, batchVolumeTier);
                             const newLeads: Lead[] = results.map((res, idx) => ({
                               id: `lead-${Date.now()}-${idx}-${Math.random().toString(36).substring(7)}`,
                               fundId: 'redwood-cap',
@@ -3190,12 +3238,61 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                   </div>
                 </div>
 
-                <div className="relative py-4">
+                {/* High-Volume State Contractor & SOS Registry Feeds */}
+                <div className="pt-4 border-t border-zinc-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-zinc-900 text-sm flex items-center gap-2">
+                        <Database className="h-4 w-4 text-emerald-600" />
+                        High-Volume State Contractor & SOS Registry Feeds
+                      </h4>
+                      <p className="text-xs text-zinc-500">
+                        Direct pre-indexed ingestion batches (50–65 targets each) from state licensing boards & SOS corporate registries.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {REGISTRY_DATASETS.map(dataset => (
+                      <div 
+                        key={dataset.id}
+                        className="rounded-xl border border-zinc-200/90 bg-zinc-50/70 p-4 space-y-2 hover:border-emerald-300 transition-all"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 uppercase">
+                              {dataset.state} Registry
+                            </span>
+                            <h5 className="font-bold text-zinc-900 text-xs mt-1">{dataset.name}</h5>
+                          </div>
+                          <span className="text-xs font-bold text-zinc-700 font-mono bg-white px-2 py-0.5 rounded border border-zinc-200 shadow-2xs">
+                            {dataset.estimatedCount} Leads
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-zinc-500 line-clamp-2">{dataset.description}</p>
+                        <div className="pt-1 flex items-center justify-between">
+                          <span className="text-[10px] text-zinc-400 font-medium">{dataset.region}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleIngestRegistryBatch(dataset.id)}
+                            disabled={isIngestingRegistry === dataset.id}
+                            className="flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-colors"
+                          >
+                            {isIngestingRegistry === dataset.id ? <Clock className="h-3 w-3 animate-spin" /> : <FileUp className="h-3 w-3" />}
+                            Ingest Batch ({dataset.estimatedCount})
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="relative py-2">
                   <div className="absolute inset-0 flex items-center">
                     <span className="w-full border-t border-zinc-100"></span>
                   </div>
                   <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white px-2 text-zinc-400">Or use sample data</span>
+                    <span className="bg-white px-2 text-zinc-400">Automated Pipeline Capabilities</span>
                   </div>
                 </div>
 

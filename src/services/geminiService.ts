@@ -333,6 +333,73 @@ export const searchBusinessesByCity = async (city: string): Promise<Partial<Lead
   }
 };
 
+export type BatchVolumeTier = 'standard' | 'deep_scan' | 'enterprise_blitz';
+
+export const searchBusinessesBatch = async (
+  city: string,
+  tier: BatchVolumeTier = 'standard'
+): Promise<Partial<Lead>[]> => {
+  if (tier === 'standard') {
+    return searchBusinessesByCity(city);
+  }
+
+  const trimmedCity = (city || '').trim();
+
+  const sectors = tier === 'deep_scan'
+    ? [
+        { name: 'HVAC & Mechanical Systems', query: 'Commercial HVAC mechanical contractors' },
+        { name: 'Commercial Plumbing', query: 'Commercial industrial plumbing and piping' },
+        { name: 'Electrical Contractors', query: 'Industrial electrical and automation contractors' },
+        { name: 'Precision Machining', query: 'Precision tool die and CNC machine shops' }
+      ]
+    : [
+        { name: 'HVAC & Mechanical Systems', query: 'Commercial HVAC mechanical contractors' },
+        { name: 'Commercial Plumbing', query: 'Commercial industrial plumbing and piping' },
+        { name: 'Electrical Contractors', query: 'Industrial electrical and automation contractors' },
+        { name: 'Precision Machining', query: 'Precision tool die and CNC machine shops' },
+        { name: 'Commercial Roofing', query: 'Commercial industrial roofing contractors' },
+        { name: 'Fire Protection & Life Safety', query: 'Fire sprinkler and life safety contractors' },
+        { name: 'Structural Steel Fabrication', query: 'Structural steel fabrication and erection' },
+        { name: 'Commercial Landscaping & Civil', query: 'Commercial landscape maintenance and paving' }
+      ];
+
+  const sectorPromises = sectors.map(async (sec) => {
+    try {
+      const results = await searchBusinessesByCity(`${trimmedCity} - ${sec.query}`);
+      return results.map(r => ({
+        ...r,
+        industry: sec.name
+      }));
+    } catch {
+      return searchBusinessesByCity(trimmedCity);
+    }
+  });
+
+  const settled = await Promise.allSettled(sectorPromises);
+  const combined: Partial<Lead>[] = [];
+  const seenNames = new Set<string>();
+
+  settled.forEach((res) => {
+    if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+      res.value.forEach((item) => {
+        const cleanName = (item.name || '').toLowerCase().trim();
+        if (cleanName && !seenNames.has(cleanName)) {
+          seenNames.add(cleanName);
+          combined.push(item);
+        } else if (!cleanName) {
+          combined.push(item);
+        }
+      });
+    }
+  });
+
+  if (combined.length > 0) {
+    return combined;
+  }
+  return searchBusinessesByCity(trimmedCity);
+};
+
+
 export const generateOutreachLetter = async (
   lead: Lead, 
   templateType: string = 'direct_acquisition'
