@@ -22,7 +22,7 @@ export type DealSourceChannel =
   | 'INBOUND_INTEREST';
 
 export interface ListingDetails {
-  sourcePlatform: 'BizBuySell' | 'Axial' | 'BusinessesForSale' | 'Transworld' | 'Sunbelt' | 'DirectBroker' | 'Other';
+  sourcePlatform: 'BizBuySell' | 'Axial' | 'BusinessesForSale' | 'Transworld' | 'Sunbelt' | 'Crexi' | 'LoopNet' | 'MarcusMillichap' | 'SVN' | 'DirectBroker' | 'Other';
   listingId?: string;
   listingUrl?: string;
   askingPrice?: number;
@@ -36,6 +36,12 @@ export interface ListingDetails {
   matchedEntityId?: string;
   matchConfidence?: number; // 0-100% confidence matching blind listing to registered entity
   teaserSummary?: string;
+  // Real Estate & Property Management Specific Metrics
+  doorsUnderManagement?: number;
+  unitsCount?: number;
+  occupancyRatePct?: number;
+  inPlaceNoi?: number;
+  capRatePct?: number;
 }
 
 export interface InboundInterestDetails {

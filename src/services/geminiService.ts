@@ -303,6 +303,8 @@ export const searchBusinessesByCity = async (city: string): Promise<Partial<Lead
     const tradeCatalogs = [
       { trade: "HVAC & Mechanical", suffix: "Heating, Air & Controls", base: 58, drop: 72, rev: 3800000 },
       { trade: "Commercial Plumbing", suffix: "Commercial Plumbing & Piping", base: 82, drop: 65, rev: 4400000 },
+      { trade: "Property Management", suffix: "Residential & Commercial Asset Management", base: 60, drop: 45, rev: 3900000 },
+      { trade: "Multifamily Real Estate", suffix: "Apartment Communities & Real Estate Asset Portfolios", base: 50, drop: 38, rev: 7200000 },
       { trade: "Precision Machining", suffix: "Tool & Die Manufacturing", base: 44, drop: 82, rev: 5600000 },
       { trade: "Commercial Roofing", suffix: "Industrial Roofing Systems", base: 96, drop: 54, rev: 6100000 },
       { trade: "Electrical Contractors", suffix: "Electric & Industrial Automation", base: 68, drop: 60, rev: 4100000 },
@@ -349,12 +351,16 @@ export const searchBusinessesBatch = async (
     ? [
         { name: 'HVAC & Mechanical Systems', query: 'Commercial HVAC mechanical contractors' },
         { name: 'Commercial Plumbing', query: 'Commercial industrial plumbing and piping' },
+        { name: 'Property Management', query: 'Commercial property management and HOA management companies' },
+        { name: 'Multifamily Real Estate', query: 'Multifamily real estate apartment communities and portfolios' },
         { name: 'Electrical Contractors', query: 'Industrial electrical and automation contractors' },
         { name: 'Precision Machining', query: 'Precision tool die and CNC machine shops' }
       ]
     : [
         { name: 'HVAC & Mechanical Systems', query: 'Commercial HVAC mechanical contractors' },
         { name: 'Commercial Plumbing', query: 'Commercial industrial plumbing and piping' },
+        { name: 'Property Management', query: 'Residential and commercial property management firms' },
+        { name: 'Multifamily Real Estate', query: 'Multifamily apartment communities and value-add real estate portfolios' },
         { name: 'Electrical Contractors', query: 'Industrial electrical and automation contractors' },
         { name: 'Precision Machining', query: 'Precision tool die and CNC machine shops' },
         { name: 'Commercial Roofing', query: 'Commercial industrial roofing contractors' },

@@ -237,5 +237,107 @@ export const SAMPLE_MARKETPLACE_LISTINGS: Partial<Lead>[] = [
       brokerEmail: 'gchen@beaconmapartners.com',
       teaserSummary: 'High-margin commercial flat-roof membrane replacement contractor with Master Elite GAF certifications.'
     }
+  },
+  {
+    name: 'Sunbelt Metro HOA & Residential Property Management Group',
+    industry: 'Property Management',
+    location: 'Dallas, TX',
+    revenue: 3800000,
+    ebitda: 920000,
+    valuationEstimate: 4600000,
+    dealSourceChannel: 'ON_MARKET_LISTING',
+    listingDetails: {
+      sourcePlatform: 'BizBuySell',
+      listingId: 'BBS-TX-99042',
+      listingUrl: 'https://www.bizbuysell.com/listings/sample-pm-dallas',
+      askingPrice: 4200000,
+      cashFlowOrSde: 920000,
+      daysOnMarket: 135,
+      priceDropPct: 10,
+      isBlindTeaser: false,
+      brokerName: 'Courtney Sterling',
+      brokerFirm: 'Lone Star M&A Advisory',
+      brokerEmail: 'csterling@lonestarma.com',
+      doorsUnderManagement: 1450,
+      teaserSummary: 'Turnkey property management firm with 1,450 residential and HOA doors under long-term management contracts across the Dallas-Fort Worth metroplex. High 94% contract renewal rate with automated AppFolio software workflows.'
+    }
+  },
+  {
+    name: 'Oakwood Terrace 84-Unit Value-Add Multifamily Portfolio',
+    industry: 'Multifamily Real Estate',
+    location: 'Fort Worth, TX',
+    revenue: 1650000,
+    ebitda: 780000, // In-Place Net Operating Income (NOI)
+    valuationEstimate: 10500000,
+    dealSourceChannel: 'ON_MARKET_LISTING',
+    listingDetails: {
+      sourcePlatform: 'Crexi',
+      listingId: 'CRX-MF-8401',
+      listingUrl: 'https://www.crexi.com/properties/sample-oakwood-84-units',
+      askingPrice: 10200000,
+      cashFlowOrSde: 780000, // In-place NOI
+      daysOnMarket: 95,
+      priceDropPct: 6,
+      isBlindTeaser: false,
+      brokerName: 'Harrison Blake, CCIM',
+      brokerFirm: 'Colliers Multifamily Capital Markets',
+      brokerEmail: 'hblake@colliers.com',
+      unitsCount: 84,
+      occupancyRatePct: 94.2,
+      inPlaceNoi: 780000,
+      capRatePct: 7.6,
+      teaserSummary: '84-unit garden-style multifamily community. 94.2% in-place occupancy, stable collections, and $230/unit proven rental upside on classic interiors. Individually metered for electricity and HVAC.'
+    }
+  },
+  {
+    name: 'The Meridian 120-Unit Class-B Apartment Community',
+    industry: 'Multifamily Real Estate',
+    location: 'Atlanta, GA',
+    revenue: 2750000,
+    ebitda: 1320000, // In-Place NOI
+    valuationEstimate: 18500000,
+    dealSourceChannel: 'ON_MARKET_LISTING',
+    listingDetails: {
+      sourcePlatform: 'LoopNet',
+      listingId: 'LPN-ATL-1209',
+      listingUrl: 'https://www.loopnet.com/Listing/sample-meridian-120-atlanta',
+      askingPrice: 17900000,
+      cashFlowOrSde: 1320000,
+      daysOnMarket: 160,
+      priceDropPct: 9,
+      isBlindTeaser: true,
+      brokerName: 'Julian Mercer',
+      brokerFirm: 'Marcus & Millichap Real Estate Investment Services',
+      brokerEmail: 'jmercer@marcusmillichap.com',
+      unitsCount: 120,
+      occupancyRatePct: 95.5,
+      inPlaceNoi: 1320000,
+      capRatePct: 7.4,
+      teaserSummary: 'Confidential 120-unit apartment asset in high-growth North Atlanta suburban corridor. Pitched pitched roofs, community clubhouse, pool, and upside via operational lease loss-to-lease burn-off.'
+    }
+  },
+  {
+    name: 'Piedmont Commercial Facility & Association Management',
+    industry: 'Property Management',
+    location: 'Charlotte, NC',
+    revenue: 3100000,
+    ebitda: 740000,
+    valuationEstimate: 3700000,
+    dealSourceChannel: 'ON_MARKET_LISTING',
+    listingDetails: {
+      sourcePlatform: 'Axial',
+      listingId: 'AXL-NC-3310',
+      listingUrl: 'https://network.axial.net/deals/sample-piedmont-pm',
+      askingPrice: 3500000,
+      cashFlowOrSde: 740000,
+      daysOnMarket: 110,
+      priceDropPct: 0,
+      isBlindTeaser: false,
+      brokerName: 'Sarah Jenkins',
+      brokerFirm: 'Carolina Business Advisors',
+      brokerEmail: 'sjenkins@carolinaba.com',
+      doorsUnderManagement: 980,
+      teaserSummary: 'Full-service commercial asset and condo association manager covering the Charlotte-Gastonia corridor with 980 units and recurring monthly management retainer agreements.'
+    }
   }
 ];

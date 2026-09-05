@@ -65,6 +65,22 @@ export const TRADE_BENCHMARKS: Record<string, IndustryBenchmark> = {
     avgPermitDrop: 18.0,
     avgPropensityScore: 6.0,
     sampleCount: 530
+  },
+  'Property Management': {
+    industry: 'Property Management',
+    avgProfitMargin: 24.5,
+    avgEvEbitdaMultiple: 5.2,
+    avgPermitDrop: 15.0,
+    avgPropensityScore: 7.2,
+    sampleCount: 920
+  },
+  'Multifamily Real Estate': {
+    industry: 'Multifamily Real Estate',
+    avgProfitMargin: 48.0,
+    avgEvEbitdaMultiple: 8.5,
+    avgPermitDrop: 22.0,
+    avgPropensityScore: 7.8,
+    sampleCount: 1150
   }
 };
 
