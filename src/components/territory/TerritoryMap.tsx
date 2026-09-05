@@ -1,10 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Lead } from '../../types';
 import { 
   getLeadCoordinates, 
   optimizeScoutDrivingRoute, 
   OptimizedRouteItinerary, 
-  CITY_COORDINATES 
+  CITY_COORDINATES,
+  resolveLocationCoordinates,
+  detectDominantCityHub,
+  extractAvailableHubs,
+  calculateHaversineDistanceMiles
 } from '../../utils/geoRouting';
 import { 
   MapPin, 
@@ -17,7 +21,14 @@ import {
   ChevronRight,
   Flame,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Search,
+  SlidersHorizontal,
+  Target,
+  LocateFixed,
+  RotateCcw,
+  Sparkles,
+  Map as MapIcon
 } from 'lucide-react';
 
 interface TerritoryMapProps {
@@ -29,141 +40,448 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   leads,
   onSelectLead
 }) => {
-  const [selectedHub, setSelectedHub] = useState<string>('Stockton, CA');
+  // Dynamically default hub to the city with highest lead density, or Dallas, TX
+  const [selectedHub, setSelectedHub] = useState<string>(() => detectDominantCityHub(leads));
+  const [customHubInput, setCustomHubInput] = useState<string>('');
+  const [isCustomHubMode, setIsCustomHubMode] = useState<boolean>(false);
+  const [radiusMiles, setRadiusMiles] = useState<number>(100); // 25, 50, 100, 250, or Infinity
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [itinerary, setItinerary] = useState<OptimizedRouteItinerary | null>(null);
-  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
 
-  // Calculate coordinates for all leads
-  const mappedLeads = useMemo(() => {
-    return leads.map(lead => ({
-      lead,
-      coords: getLeadCoordinates(lead)
-    }));
+  // Re-evaluate dominant hub if leads change and current hub has zero leads
+  useEffect(() => {
+    if (leads.length > 0) {
+      const activeHubs = extractAvailableHubs(leads);
+      const currentHubMatches = activeHubs.some(h => 
+        selectedHub.toLowerCase().includes(h.name.split(',')[0].toLowerCase())
+      );
+      if (!currentHubMatches && activeHubs.length > 0) {
+        setSelectedHub(activeHubs[0].name);
+      }
+    }
   }, [leads]);
 
-  // Compute map bounds to fit all coordinates
-  const bounds = useMemo(() => {
-    if (mappedLeads.length === 0) {
-      return { minLat: 36.5, maxLat: 39.0, minLng: -122.5, maxLng: -119.5 };
-    }
-    const lats = mappedLeads.map(m => m.coords.lat);
-    const lngs = mappedLeads.map(m => m.coords.lng);
-    return {
-      minLat: Math.min(...lats) - 0.2,
-      maxLat: Math.max(...lats) + 0.2,
-      minLng: Math.min(...lngs) - 0.2,
-      maxLng: Math.max(...lngs) + 0.2
-    };
-  }, [mappedLeads]);
+  // Extract all distinct active market cities from currently loaded leads
+  const activeLeadMarkets = useMemo(() => {
+    return extractAvailableHubs(leads);
+  }, [leads]);
 
-  // Projection helper: maps lat/lng to SVG percentage (0-100%)
+  // Coordinates of the selected hub
+  const hubCoords = useMemo(() => {
+    return resolveLocationCoordinates(selectedHub);
+  }, [selectedHub]);
+
+  // Filter leads based on distance radius from the active hub
+  const leadsWithDistance = useMemo(() => {
+    return leads.map(lead => {
+      const coords = getLeadCoordinates(lead);
+      const dist = calculateHaversineDistanceMiles(hubCoords.lat, hubCoords.lng, coords.lat, coords.lng);
+      return {
+        lead,
+        coords,
+        distanceMiles: dist
+      };
+    });
+  }, [leads, hubCoords]);
+
+  const filteredLeads = useMemo(() => {
+    if (radiusMiles === Infinity) {
+      return leadsWithDistance;
+    }
+    return leadsWithDistance.filter(item => item.distanceMiles <= radiusMiles);
+  }, [leadsWithDistance, radiusMiles]);
+
+  // Compute map bounds to fit both the departure hub AND all filtered leads
+  const bounds = useMemo(() => {
+    const allLats = [hubCoords.lat, ...filteredLeads.map(m => m.coords.lat)];
+    const allLngs = [hubCoords.lng, ...filteredLeads.map(m => m.coords.lng)];
+
+    if (allLats.length === 1) {
+      // Only hub exists
+      return {
+        minLat: hubCoords.lat - 0.5,
+        maxLat: hubCoords.lat + 0.5,
+        minLng: hubCoords.lng - 0.5,
+        maxLng: hubCoords.lng + 0.5
+      };
+    }
+
+    const minLat = Math.min(...allLats);
+    const maxLat = Math.max(...allLats);
+    const minLng = Math.min(...allLngs);
+    const maxLng = Math.max(...allLngs);
+
+    const latSpan = Math.max(0.2, maxLat - minLat);
+    const lngSpan = Math.max(0.2, maxLng - minLng);
+
+    return {
+      minLat: minLat - latSpan * 0.15,
+      maxLat: maxLat + latSpan * 0.15,
+      minLng: minLng - lngSpan * 0.15,
+      maxLng: maxLng + lngSpan * 0.15
+    };
+  }, [hubCoords, filteredLeads]);
+
+  // Unified SVG Coordinate Projection: maps lat/lng into SVG viewport (800 x 500)
   const project = (lat: number, lng: number) => {
-    const x = ((lng - bounds.minLng) / Math.max(0.1, bounds.maxLng - bounds.minLng)) * 100;
-    // Invert latitude for screen coordinates (north is up)
-    const y = 100 - (((lat - bounds.minLat) / Math.max(0.1, bounds.maxLat - bounds.minLat)) * 100);
-    return { x: Math.max(5, Math.min(95, x)), y: Math.max(5, Math.min(95, y)) };
+    const width = 800;
+    const height = 500;
+    const paddingX = 50;
+    const paddingY = 40;
+
+    const availableW = width - paddingX * 2;
+    const availableH = height - paddingY * 2;
+
+    const lngSpan = Math.max(0.01, bounds.maxLng - bounds.minLng);
+    const latSpan = Math.max(0.01, bounds.maxLat - bounds.minLat);
+
+    const xRatio = (lng - bounds.minLng) / lngSpan;
+    const yRatio = (lat - bounds.minLat) / latSpan;
+
+    const x = paddingX + xRatio * availableW;
+    // Invert latitude: north is up (SVG 0 is top)
+    const y = paddingY + (1 - yRatio) * availableH;
+
+    return {
+      x: Math.max(paddingX, Math.min(width - paddingX, x)),
+      y: Math.max(paddingY, Math.min(height - paddingY, y))
+    };
+  };
+
+  const hubSvgPt = useMemo(() => {
+    return project(hubCoords.lat, hubCoords.lng);
+  }, [hubCoords, bounds]);
+
+  const handleApplyCustomHub = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (customHubInput.trim()) {
+      setSelectedHub(customHubInput.trim());
+      setIsCustomHubMode(false);
+      setCustomHubInput('');
+      setItinerary(null);
+    }
   };
 
   const handleGenerateItinerary = () => {
     setIsOptimizing(true);
     setTimeout(() => {
-      // Pick top 5 leads with highest exit propensity or closest distance
-      const topTargets = [...leads]
+      // Pick top targets within radius sorted by exit propensity
+      const candidateLeads = (filteredLeads.length > 0 ? filteredLeads : leadsWithDistance)
+        .map(item => item.lead)
         .sort((a, b) => (b.exitPropensityScore || 0) - (a.exitPropensityScore || 0))
-        .slice(0, 5);
+        .slice(0, 6);
 
-      const route = optimizeScoutDrivingRoute(topTargets, selectedHub);
+      const route = optimizeScoutDrivingRoute(candidateLeads, selectedHub);
       setItinerary(route);
       setIsOptimizing(false);
     }, 400);
   };
 
   return (
-    <div className="flex h-full flex-col bg-zinc-950 text-white overflow-hidden">
-      {/* Top Territory Bar */}
-      <div className="flex flex-wrap items-center justify-between border-b border-zinc-800 bg-zinc-900/50 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
-            <Compass className="h-4 w-4" />
+    <div className="flex h-full flex-col bg-zinc-950 text-white rounded-2xl border border-zinc-800/80 shadow-2xl overflow-hidden">
+      {/* Top Territory Command Header */}
+      <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/60 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
+              <Compass className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold tracking-tight text-white">Territory Deal Scout Radar</h2>
+                <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/20">
+                  Dynamic Multi-Market
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Geospatial cluster mapping & optimized traveling-salesman site visit itineraries
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-lg font-bold tracking-tight text-white">Territory Deal Scout Radar</h2>
-            <p className="text-xs text-zinc-400">Geospatial cluster mapping & optimized traveling-salesman site visit itineraries</p>
+
+          {/* Departure Hub Controls */}
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 flex items-center gap-1 font-medium">
+                <Target className="h-3.5 w-3.5 text-emerald-400" />
+                Departure Hub:
+              </span>
+
+              {isCustomHubMode ? (
+                <form onSubmit={handleApplyCustomHub} className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={customHubInput}
+                    onChange={(e) => setCustomHubInput(e.target.value)}
+                    placeholder="Enter city, state or address..."
+                    autoFocus
+                    className="w-52 rounded-lg border border-emerald-500/50 bg-zinc-900 px-2.5 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white hover:bg-emerald-500 transition-colors"
+                  >
+                    Set
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomHubMode(false)}
+                    className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-zinc-300 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={selectedHub}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') {
+                        setIsCustomHubMode(true);
+                      } else {
+                        setSelectedHub(e.target.value);
+                        setItinerary(null);
+                      }
+                    }}
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-semibold text-white focus:outline-none focus:border-emerald-500/50"
+                  >
+                    {activeLeadMarkets.length > 0 && (
+                      <optgroup label="📍 Active Markets With Leads">
+                        {activeLeadMarkets.map(m => (
+                          <option key={m.name} value={m.name}>
+                            {m.name} ({m.count} {m.count === 1 ? 'target' : 'targets'})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+
+                    <optgroup label="🇺🇸 Nationwide Metropolitan Hubs">
+                      {Object.keys(CITY_COORDINATES).map(city => (
+                        <option key={city} value={city}>{city}</option>
+                      ))}
+                    </optgroup>
+
+                    <optgroup label="✏️ Custom Location">
+                      <option value="__custom__">+ Enter Custom City or Address...</option>
+                    </optgroup>
+                  </select>
+
+                  <button
+                    onClick={() => setIsCustomHubMode(true)}
+                    title="Type any custom address or city"
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 hover:text-emerald-400 hover:border-zinc-700 transition-colors"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={handleGenerateItinerary}
+              disabled={isOptimizing || leads.length === 0}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 font-bold text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50 transition-colors"
+            >
+              <Route className="h-3.5 w-3.5" />
+              {isOptimizing ? 'Computing Route...' : 'Optimize Scout Itinerary'}
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-400">Departure Hub:</span>
-            <select
-              value={selectedHub}
-              onChange={(e) => setSelectedHub(e.target.value)}
-              className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-semibold text-white focus:outline-none"
-            >
-              {Object.keys(CITY_COORDINATES).map(city => (
-                <option key={city} value={city}>{city}</option>
-              ))}
-            </select>
+        {/* Dynamic Quick Market Chips & Radius Filter Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/60 text-xs">
+          {/* Active Lead Markets Quick Jump */}
+          <div className="flex items-center gap-2 overflow-x-auto py-0.5">
+            <span className="text-zinc-500 text-[11px] font-medium whitespace-nowrap">Active Markets:</span>
+            {activeLeadMarkets.length > 0 ? (
+              activeLeadMarkets.slice(0, 6).map(m => {
+                const isActive = selectedHub.toLowerCase().includes(m.name.split(',')[0].toLowerCase());
+                return (
+                  <button
+                    key={m.name}
+                    onClick={() => {
+                      setSelectedHub(m.name);
+                      setItinerary(null);
+                    }}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all whitespace-nowrap flex items-center gap-1 ${
+                      isActive 
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                        : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700 hover:text-white'
+                    }`}
+                  >
+                    <span>{m.name.split(',')[0]}</span>
+                    <span className="rounded-full bg-zinc-800 px-1.5 py-0.2 text-[9px] text-zinc-400">{m.count}</span>
+                  </button>
+                );
+              })
+            ) : (
+              <span className="text-zinc-500 text-[11px] italic">No active city clusters yet</span>
+            )}
           </div>
 
-          <button
-            onClick={handleGenerateItinerary}
-            disabled={isOptimizing || leads.length === 0}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 font-bold text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50 transition-colors"
-          >
-            <Route className="h-3.5 w-3.5" />
-            {isOptimizing ? 'Computing Route...' : 'Optimize Scout Itinerary'}
-          </button>
+          {/* Radius Filter Pills */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-zinc-500 text-[11px] font-medium flex items-center gap-1">
+              <SlidersHorizontal className="h-3 w-3" />
+              Radius:
+            </span>
+            {[
+              { label: '25 mi', value: 25 },
+              { label: '50 mi', value: 50 },
+              { label: '100 mi', value: 100 },
+              { label: '250 mi', value: 250 },
+              { label: 'Nationwide', value: Infinity }
+            ].map(r => (
+              <button
+                key={r.label}
+                onClick={() => setRadiusMiles(r.value)}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  radiusMiles === r.value
+                    ? 'bg-zinc-200 text-zinc-950 shadow-sm'
+                    : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Main Split: Territory Map SVG & Itinerary Panel */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col lg:flex-row overflow-hidden min-h-[540px]">
         {/* Territory Radar SVG Map */}
-        <div className="relative flex-1 bg-zinc-950 p-6 overflow-hidden flex items-center justify-center">
-          {/* Subtle Radar Concentric Rings */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
-            <div className="h-96 w-96 rounded-full border border-emerald-500/40"></div>
-            <div className="absolute h-[500px] w-[500px] rounded-full border border-emerald-500/20"></div>
-            <div className="absolute h-[680px] w-[680px] rounded-full border border-zinc-800"></div>
+        <div className="relative flex-1 bg-zinc-950 p-4 lg:p-6 overflow-hidden flex flex-col items-center justify-center">
+          {/* Radar Status Overlay Banner */}
+          <div className="absolute top-6 left-6 z-10 flex items-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/90 px-3.5 py-2 text-xs shadow-xl backdrop-blur-md">
+            <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="text-zinc-300">
+              Showing <strong className="text-white">{filteredLeads.length}</strong> of{' '}
+              <strong className="text-white">{leads.length}</strong> targets
+              {radiusMiles !== Infinity && (
+                <> within <strong className="text-emerald-400">{radiusMiles} miles</strong> of {selectedHub.split(',')[0]}</>
+              )}
+            </span>
           </div>
 
-          {/* Map Surface SVG */}
-          <svg className="h-full w-full max-h-[600px] max-w-[800px] rounded-2xl border border-zinc-800/80 bg-zinc-900/30 p-4 shadow-2xl backdrop-blur-sm">
-            {/* Route Connector Lines if Itinerary exists */}
-            {itinerary && itinerary.stops.length > 1 && (
+          {/* Recenter / Reset Controls */}
+          <div className="absolute top-6 right-6 z-10 flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (activeLeadMarkets.length > 0) {
+                  setSelectedHub(activeLeadMarkets[0].name);
+                }
+                setRadiusMiles(Infinity);
+              }}
+              title="Show all targets nationwide"
+              className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/90 px-2.5 py-1.5 text-xs text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors shadow-lg backdrop-blur-md"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Fit All Targets
+            </button>
+          </div>
+
+          {/* Interactive Scalable SVG Radar Surface */}
+          <svg 
+            viewBox="0 0 800 500" 
+            className="w-full h-full max-h-[520px] rounded-2xl border border-zinc-800/80 bg-zinc-900/20 shadow-2xl backdrop-blur-sm select-none"
+          >
+            <defs>
+              {/* Radial Radar Glow Gradient */}
+              <radialGradient id="radarPulse" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#10b981" stopOpacity="0.15" />
+                <stop offset="50%" stopColor="#10b981" stopOpacity="0.05" />
+                <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+              </radialGradient>
+
+              {/* Grid Background Pattern */}
+              <pattern id="radarGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#27272a" strokeWidth="0.5" strokeOpacity="0.4" />
+              </pattern>
+            </defs>
+
+            {/* Background Grid */}
+            <rect width="800" height="500" fill="url(#radarGrid)" />
+
+            {/* Radar Concentric Rings Centered on Departure Hub */}
+            <g transform={`translate(${hubSvgPt.x}, ${hubSvgPt.y})`}>
+              <circle r="220" fill="url(#radarPulse)" />
+              <circle r="70" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.25" />
+              <circle r="140" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="4 4" strokeOpacity="0.2" />
+              <circle r="220" fill="none" stroke="#3f3f46" strokeWidth="1" strokeDasharray="5 5" strokeOpacity="0.3" />
+              <line x1="-250" y1="0" x2="250" y2="0" stroke="#27272a" strokeWidth="1" strokeDasharray="2 4" />
+              <line x1="0" y1="-250" x2="0" y2="250" stroke="#27272a" strokeWidth="1" strokeDasharray="2 4" />
+            </g>
+
+            {/* Route Connector Lines if Itinerary Exists */}
+            {itinerary && itinerary.stops.length > 0 && (
               <g>
                 {itinerary.stops.map((stop, idx) => {
-                  if (idx === 0) return null;
-                  const prev = itinerary.stops[idx - 1];
-                  const p1 = project(prev.coordinates.lat, prev.coordinates.lng);
-                  const p2 = project(stop.coordinates.lat, stop.coordinates.lng);
+                  const startPt = idx === 0 ? hubSvgPt : project(itinerary.stops[idx - 1].coordinates.lat, itinerary.stops[idx - 1].coordinates.lng);
+                  const endPt = project(stop.coordinates.lat, stop.coordinates.lng);
 
                   return (
-                    <line
-                      key={idx}
-                      x1={`${p1.x}%`}
-                      y1={`${p1.y}%`}
-                      x2={`${p2.x}%`}
-                      y2={`${p2.y}%`}
-                      stroke="#10b981"
-                      strokeWidth="2.5"
-                      strokeDasharray="6 4"
-                      className="opacity-80"
-                    />
+                    <g key={`route-leg-${idx}`}>
+                      <line
+                        x1={startPt.x}
+                        y1={startPt.y}
+                        x2={endPt.x}
+                        y2={endPt.y}
+                        stroke="#10b981"
+                        strokeWidth="2.5"
+                        strokeDasharray="6 4"
+                        strokeOpacity="0.85"
+                      />
+                      {/* Midpoint distance label */}
+                      <circle
+                        cx={(startPt.x + endPt.x) / 2}
+                        cy={(startPt.y + endPt.y) / 2}
+                        r="9"
+                        fill="#09090b"
+                        stroke="#10b981"
+                        strokeWidth="1"
+                      />
+                      <text
+                        x={(startPt.x + endPt.x) / 2}
+                        y={(startPt.y + endPt.y) / 2}
+                        textAnchor="middle"
+                        dy="3"
+                        fill="#34d399"
+                        fontSize="8"
+                        fontWeight="bold"
+                      >
+                        {Math.round(stop.distanceFromPreviousMiles)}m
+                      </text>
+                    </g>
                   );
                 })}
               </g>
             )}
 
-            {/* Entity Pin Nodes */}
-            {mappedLeads.map(({ lead, coords }) => {
+            {/* Departure Hub Beacon Node */}
+            <g transform={`translate(${hubSvgPt.x}, ${hubSvgPt.y})`} className="cursor-default">
+              <circle r="18" fill="#3b82f6" fillOpacity="0.15" className="animate-ping" />
+              <circle r="12" fill="#09090b" stroke="#3b82f6" strokeWidth="2.5" />
+              <circle r="4" fill="#60a5fa" />
+              <text
+                y="-18"
+                textAnchor="middle"
+                fill="#93c5fd"
+                fontSize="10"
+                fontWeight="bold"
+                className="drop-shadow-md select-none"
+              >
+                HUB: {selectedHub.split(',')[0]}
+              </text>
+            </g>
+
+            {/* Target Lead Pin Nodes */}
+            {filteredLeads.map(({ lead, coords }) => {
               const pt = project(coords.lat, coords.lng);
               const isHigh = (lead.exitPropensityScore || 0) >= 8;
               const isMed = (lead.exitPropensityScore || 0) >= 5;
               const isSelected = selectedLead?.id === lead.id;
-
               const pinColor = isHigh ? '#10b981' : isMed ? '#f59e0b' : '#71717a';
 
               // Check if lead is in the current route itinerary
@@ -172,11 +490,11 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               return (
                 <g
                   key={lead.id}
-                  transform={`translate(${pt.x * 7.5 + 20}, ${pt.y * 5.2 + 20})`}
+                  transform={`translate(${pt.x}, ${pt.y})`}
                   onClick={() => setSelectedLead(lead)}
-                  className="cursor-pointer transition-transform hover:scale-125"
+                  className="cursor-pointer transition-all hover:scale-125 group"
                 >
-                  {/* Ping Ring for High Propensity */}
+                  {/* Ping Ring for High Propensity Targets */}
                   {isHigh && (
                     <circle
                       r="16"
@@ -213,26 +531,65 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                     />
                   )}
 
-                  {/* Label on Hover / Selected */}
-                  {(isSelected || isHigh) && (
-                    <text
-                      y="-16"
-                      textAnchor="middle"
-                      fill="#e4e4e7"
-                      fontSize="10"
-                      fontWeight="bold"
-                      className="pointer-events-none drop-shadow-md select-none"
-                    >
-                      {lead.name.length > 18 ? `${lead.name.substring(0, 16)}...` : lead.name}
-                    </text>
-                  )}
+                  {/* Label */}
+                  <text
+                    y="-16"
+                    textAnchor="middle"
+                    fill={isSelected ? "#10b981" : "#e4e4e7"}
+                    fontSize="10"
+                    fontWeight="bold"
+                    className="drop-shadow-md select-none opacity-80 group-hover:opacity-100"
+                  >
+                    {lead.name.length > 18 ? `${lead.name.substring(0, 16)}...` : lead.name}
+                  </text>
                 </g>
               );
             })}
           </svg>
 
+          {/* Zero Leads Within Radius Fallback Banner */}
+          {filteredLeads.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center p-6 bg-zinc-950/75 backdrop-blur-sm">
+              <div className="max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-center space-y-4 shadow-2xl">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-400">
+                  <Target className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-white text-base">No Targets Within {radiusMiles} Miles</h4>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    No leads are currently located within {radiusMiles} miles of <strong>{selectedHub}</strong>. 
+                    {leads.length > 0 && ` We found ${leads.length} total targets across other regions.`}
+                  </p>
+                </div>
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    onClick={() => setRadiusMiles(Infinity)}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
+                  >
+                    Show Nationwide Targets ({leads.length})
+                  </button>
+                  {activeLeadMarkets.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setSelectedHub(activeLeadMarkets[0].name);
+                        setRadiusMiles(100);
+                      }}
+                      className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-bold text-zinc-200 hover:text-white transition-colors"
+                    >
+                      Jump to {activeLeadMarkets[0].name.split(',')[0]}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Map Legend */}
-          <div className="absolute bottom-10 left-10 flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/90 px-4 py-2 text-xs shadow-xl backdrop-blur-md">
+          <div className="absolute bottom-6 left-6 flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/90 px-4 py-2 text-xs shadow-xl backdrop-blur-md">
+            <div className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-blue-400"></span>
+              <span className="text-zinc-300">Departure Hub</span>
+            </div>
             <div className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
               <span className="text-zinc-300">High Propensity (8-10)</span>
@@ -249,7 +606,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
         </div>
 
         {/* Right Sidebar: Optimized Route Itinerary & Lead Inspector */}
-        <div className="w-96 border-l border-zinc-800 bg-zinc-900/70 p-6 flex flex-col justify-between overflow-y-auto backdrop-blur-sm">
+        <div className="w-full lg:w-96 border-t lg:border-t-0 lg:border-l border-zinc-800 bg-zinc-900/70 p-6 flex flex-col justify-between overflow-y-auto backdrop-blur-sm">
           <div className="space-y-6">
             {/* Itinerary Summary Card */}
             {itinerary ? (
@@ -296,7 +653,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                           <p className="font-bold text-white truncate">{stop.lead.name}</p>
                           <p className="text-[10px] text-zinc-400 truncate">{stop.lead.location} • {stop.lead.industry}</p>
                           <span className="text-[10px] text-emerald-400 font-mono mt-0.5 block">
-                            +{stop.distanceFromPreviousMiles} mi from prev
+                            +{stop.distanceFromPreviousMiles} mi from prev stop
                           </span>
                         </div>
                       </div>
@@ -316,13 +673,54 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 </a>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center text-center p-8 rounded-2xl border border-dashed border-zinc-800 space-y-3">
-                <Route className="h-8 w-8 text-zinc-600" />
-                <div>
-                  <h4 className="font-bold text-zinc-300 text-sm">No Itinerary Generated Yet</h4>
-                  <p className="text-xs text-zinc-500 mt-1">
-                    Click "Optimize Scout Itinerary" above to calculate the most efficient route between targets.
-                  </p>
+              <div className="space-y-4">
+                <div className="flex flex-col items-center justify-center text-center p-6 rounded-2xl border border-dashed border-zinc-800 space-y-3">
+                  <Route className="h-8 w-8 text-zinc-600" />
+                  <div>
+                    <h4 className="font-bold text-zinc-300 text-sm">No Itinerary Generated Yet</h4>
+                    <p className="text-xs text-zinc-500 mt-1">
+                      Click "Optimize Scout Itinerary" above to calculate the most efficient route between targets.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleGenerateItinerary}
+                    disabled={isOptimizing || filteredLeads.length === 0}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 font-bold text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50 transition-colors text-xs"
+                  >
+                    <Route className="h-3.5 w-3.5" />
+                    Calculate Optimal Itinerary
+                  </button>
+                </div>
+
+                {/* Nearby Targets Preview */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                      Nearby Targets ({filteredLeads.length})
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                    {filteredLeads.slice(0, 5).map(({ lead, distanceMiles }) => (
+                      <div
+                        key={lead.id}
+                        onClick={() => setSelectedLead(lead)}
+                        className={`flex items-center justify-between rounded-xl border p-2.5 text-xs cursor-pointer transition-colors ${
+                          selectedLead?.id === lead.id
+                            ? 'border-emerald-500/50 bg-emerald-950/20'
+                            : 'border-zinc-800/80 bg-zinc-950/40 hover:border-zinc-700'
+                        }`}
+                      >
+                        <div className="truncate mr-2">
+                          <p className="font-bold text-white truncate">{lead.name}</p>
+                          <p className="text-[10px] text-zinc-400 truncate">{lead.location}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-[10px] font-bold text-emerald-400">{distanceMiles} mi</span>
+                          <p className="text-[9px] text-zinc-500">Score {lead.exitPropensityScore}/10</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -336,8 +734,10 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 </div>
                 <h4 className="font-bold text-white text-sm">{selectedLead.name}</h4>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-zinc-400">Location: <span className="text-white">{selectedLead.location}</span></div>
-                  <div className="text-zinc-400">Propensity: <span className="font-bold text-amber-400">{selectedLead.exitPropensityScore}/10</span></div>
+                  <div className="text-zinc-400">Location: <span className="text-white block truncate">{selectedLead.location}</span></div>
+                  <div className="text-zinc-400">Propensity: <span className="font-bold text-amber-400 block">{selectedLead.exitPropensityScore}/10</span></div>
+                  <div className="text-zinc-400">Industry: <span className="text-white block truncate">{selectedLead.industry}</span></div>
+                  <div className="text-zinc-400">Status: <span className="text-emerald-400 block capitalize">{selectedLead.status}</span></div>
                 </div>
                 <button
                   onClick={() => onSelectLead(selectedLead)}
@@ -353,3 +753,4 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     </div>
   );
 };
+
