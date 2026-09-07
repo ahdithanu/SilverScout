@@ -66,6 +66,21 @@ export const LeadListView: React.FC<LeadListViewProps> = ({ leads, onSelectLead 
                         <Star className="h-3 w-3 fill-amber-500 text-amber-500" /> {lead.businessProfile.googleRating}
                       </span>
                     )}
+                    {lead.nextFollowUpDate && (
+                      <span className={`flex items-center gap-1 font-semibold rounded px-1.5 py-0.5 border text-[10px] ${
+                        new Date(lead.nextFollowUpDate) < new Date()
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : 'border-indigo-100 bg-indigo-50 text-indigo-700'
+                      }`}>
+                        <Calendar className="h-3 w-3" />
+                        Follow-up: {new Date(lead.nextFollowUpDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
+                    {lead.lastOutreachOutcome && (
+                      <span className="flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700 font-medium capitalize">
+                        {lead.lastOutreachOutcome.replace(/_/g, ' ')}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

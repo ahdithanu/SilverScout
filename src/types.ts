@@ -95,6 +95,26 @@ export interface FundDeploymentConfig {
   };
 }
 
+export type OutreachChannel = 
+  | 'phone_call' 
+  | 'email' 
+  | 'in_person_visit' 
+  | 'direct_mail' 
+  | 'linkedin' 
+  | 'other';
+
+export type OutreachOutcome = 
+  | 'spoke_with_owner' 
+  | 'left_voicemail' 
+  | 'gatekeeper_blocked' 
+  | 'scheduled_call' 
+  | 'not_interested' 
+  | 'sent_teaser' 
+  | 'replied_interested' 
+  | 'in_person_meeting' 
+  | 'follow_up_required'
+  | string;
+
 export interface ActivityLog {
   id: string;
   timestamp: string;
@@ -102,6 +122,11 @@ export interface ActivityLog {
   userName: string;
   action: string;
   details?: string;
+  channel?: OutreachChannel;
+  outcome?: OutreachOutcome;
+  notes?: string;
+  followUpDate?: string;
+  contactPerson?: string;
 }
 
 export interface DealComment {
@@ -198,6 +223,12 @@ export interface Lead {
   dealSourceChannel?: DealSourceChannel;
   listingDetails?: ListingDetails;
   inboundInterestDetails?: InboundInterestDetails;
+
+  // Structured Outreach & Touchpoint Pipeline Tracking
+  lastContactedAt?: string;
+  nextFollowUpDate?: string;
+  lastOutreachChannel?: OutreachChannel;
+  lastOutreachOutcome?: OutreachOutcome;
 
   createdAt: string;
   updatedAt: string;

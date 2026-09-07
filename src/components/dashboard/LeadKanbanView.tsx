@@ -58,7 +58,23 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({ leads, onSelectL
                       </span>
                     </div>
                     <p className="text-[10px] text-zinc-500 mt-1">{lead.industry} • {lead.location}</p>
-                    <p className="text-xs font-extrabold text-zinc-900 mt-2">${(lead.valuationEstimate || 0).toLocaleString()}</p>
+                    <div className="mt-2 flex items-center justify-between">
+                      <p className="text-xs font-extrabold text-zinc-900">${(lead.valuationEstimate || 0).toLocaleString()}</p>
+                      {lead.lastOutreachOutcome && (
+                        <span className="text-[9px] font-bold text-zinc-600 bg-zinc-100 px-1.5 py-0.5 rounded capitalize">
+                          {lead.lastOutreachOutcome.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                    </div>
+                    {lead.nextFollowUpDate && (
+                      <div className={`mt-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold border ${
+                        new Date(lead.nextFollowUpDate) < new Date()
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : 'border-indigo-100 bg-indigo-50 text-indigo-700'
+                      }`}>
+                        <span>⏰ Follow-up: {new Date(lead.nextFollowUpDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                      </div>
+                    )}
                   </Card>
                 </div>
               ))}

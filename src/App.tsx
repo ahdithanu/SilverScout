@@ -59,7 +59,8 @@ import {
   Users,
   Award,
   Navigation,
-  Truck
+  Truck,
+  PhoneCall
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -83,6 +84,7 @@ import { GraphRagConsole } from './components/intelligence/GraphRagConsole';
 import { TerritoryMap } from './components/territory/TerritoryMap';
 import { PipelineKanban } from './components/dashboard/PipelineKanban';
 import { ICTeaserModal } from './components/modals/ICTeaserModal';
+import { LogTouchpointModal } from './components/outreach/LogTouchpointModal';
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
 import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
@@ -375,6 +377,46 @@ export default function App() {
   const [isSyndicationModalOpen, setIsSyndicationModalOpen] = useState(false);
   const [icMemoData, setIcMemoData] = useState<ICMemoData | null>(null);
   const [isGeneratingICMemo, setIsGeneratingICMemo] = useState(false);
+  const [isLoggingTouchpoint, setIsLoggingTouchpoint] = useState(false);
+
+  const handleLogTouchpoint = async (touchpointData: Partial<ActivityLog>, shouldAdvanceStage: boolean) => {
+    if (!selectedLead) return;
+
+    const newLog = touchpointData as ActivityLog;
+    const updatedLogs = [newLog, ...(selectedLead.activityLogs || [])];
+
+    const isAdvancing = shouldAdvanceStage && selectedLead.status === 'new';
+    const updatedLead: Lead = {
+      ...selectedLead,
+      activityLogs: updatedLogs,
+      lastContactedAt: touchpointData.timestamp || new Date().toISOString(),
+      nextFollowUpDate: touchpointData.followUpDate || selectedLead.nextFollowUpDate,
+      lastOutreachChannel: touchpointData.channel || selectedLead.lastOutreachChannel,
+      lastOutreachOutcome: touchpointData.outcome || selectedLead.lastOutreachOutcome,
+      status: isAdvancing ? 'outreach_triggered' : selectedLead.status,
+      currentState: isAdvancing ? 'OUTREACH_TRIGGERED' : selectedLead.currentState,
+      updatedAt: new Date().toISOString()
+    };
+
+    setSelectedLead(updatedLead);
+    setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
+
+    try {
+      const leadRef = doc(db, 'leads', updatedLead.id);
+      await updateDoc(leadRef, {
+        activityLogs: updatedLogs,
+        lastContactedAt: updatedLead.lastContactedAt,
+        nextFollowUpDate: updatedLead.nextFollowUpDate || null,
+        lastOutreachChannel: updatedLead.lastOutreachChannel || null,
+        lastOutreachOutcome: updatedLead.lastOutreachOutcome || null,
+        status: updatedLead.status,
+        currentState: updatedLead.currentState || null,
+        updatedAt: updatedLead.updatedAt
+      });
+    } catch (err) {
+      console.error('Failed to sync outreach touchpoint to Firestore:', err);
+    }
+  };
 
   const handleGenerateICMemo = async (lead: Lead) => {
     setIcMemoModalLead(lead);
@@ -4780,6 +4822,23 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                         <ExternalLink className="h-3 w-3 text-zinc-400" />
                       </a>
                     )}
+
+                    {/* Log Outreach Touchpoint */}
+                    <button
+                      onClick={() => setIsLoggingTouchpoint(true)}
+                      className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50/90 px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-2xs hover:bg-emerald-100 hover:border-emerald-400 transition-colors"
+                      title="Log phone call, email, site visit, direct mail or LinkedIn touchpoint"
+                    >
+                      <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>📞 Log Touchpoint</span>
+                    </button>
+
+                    {selectedLead.nextFollowUpDate && (
+                      <div className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-800">
+                        <Calendar className="h-3 w-3 text-indigo-600" />
+                        <span>Follow-up: {new Date(selectedLead.nextFollowUpDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Operations Metadata Grid */}
@@ -5479,7 +5538,10 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
 
               <div className="pt-6 border-t border-zinc-200 space-y-6">
                     <DealComments lead={selectedLead} profile={profile} onAddComment={handleAddComment} />
-                    <ActivityTimeline logs={selectedLead.activityLogs} />
+                    <ActivityTimeline 
+                      logs={selectedLead.activityLogs} 
+                      onOpenLogTouchpoint={() => setIsLoggingTouchpoint(true)}
+                    />
                   </div>
                 <div className="mt-12 flex flex-col sm:flex-row gap-3">
                   <Button 
@@ -5626,6 +5688,18 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         onClose={() => setIsInboundPortalOpen(false)}
         onSubmitLead={handleInboundLeadSubmit}
       />
+
+      {/* Structured Call & Outreach Touchpoint Logger Modal */}
+      {isLoggingTouchpoint && selectedLead && (
+        <LogTouchpointModal
+          isOpen={isLoggingTouchpoint}
+          lead={selectedLead}
+          userName={profile?.displayName || 'Deal Scout'}
+          userId={profile?.uid || 'user_1'}
+          onClose={() => setIsLoggingTouchpoint(false)}
+          onSaveTouchpoint={handleLogTouchpoint}
+        />
+      )}
 
       {/* 1-Page Investment Committee (IC) Deal Teaser Modal */}
       <AnimatePresence>

@@ -19,6 +19,7 @@ import { processSendGridWebhookEvent, processHubSpotWebhookEvent } from '../../s
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
 import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel } from '../services/geminiService';
 import { generateRegistryBatch } from '../services/registryIngestionService';
+import { Lead, ActivityLog, OutreachChannel, OutreachOutcome } from '../types';
 
 test('RBAC Authorization Rules', async (t) => {
   await t.test('allows partners and admins to approve LOIs', () => {
@@ -589,5 +590,109 @@ test('Milestone 9: Provider Outage Simulator & DLQ Replay Engine', async (t) => 
     
     assert.equal(rec.status, 'PENDING');
     assert.equal(rec.retryCount, 0);
+  });
+});
+
+test('Multi-Channel Outreach Activity Logger & Follow-Up Pipeline Engine', async (t) => {
+  await t.test('creates structured outreach activity log with channel, outcome, notes, and follow-up', () => {
+    const log: ActivityLog = {
+      id: 'activity_test_1',
+      timestamp: new Date().toISOString(),
+      userId: 'user_scout_1',
+      userName: 'Alex Mercer (Deal Scout)',
+      action: 'Outreach: Phone Call (Spoke with Owner)',
+      details: 'Spoke with founder; confirmed 18-month exit horizon.',
+      channel: 'phone_call',
+      outcome: 'spoke_with_owner',
+      contactPerson: 'Robert Sterling (President)',
+      notes: 'Spoke with founder; confirmed 18-month exit horizon.',
+      followUpDate: '2026-04-15'
+    };
+
+    assert.equal(log.channel, 'phone_call');
+    assert.equal(log.outcome, 'spoke_with_owner');
+    assert.equal(log.contactPerson, 'Robert Sterling (President)');
+    assert.equal(log.followUpDate, '2026-04-15');
+    assert.ok(log.action.includes('Phone Call'));
+  });
+
+  await t.test('advances lead status from new to outreach_triggered upon logging touchpoint', () => {
+    const initialLead: Partial<Lead> = {
+      id: 'lead_hvac_99',
+      name: 'Apex Mechanical Services',
+      status: 'new',
+      currentState: 'INGESTED',
+      activityLogs: []
+    };
+
+    const newLog: ActivityLog = {
+      id: 'log_99',
+      timestamp: '2026-09-07T10:00:00Z',
+      userId: 'scout_1',
+      userName: 'Partner',
+      action: 'Outreach: Site Visit (Site Visit Completed)',
+      channel: 'in_person_visit',
+      outcome: 'in_person_meeting',
+      notes: 'Visited facility; inspected 12-van fleet and sheet metal shop.',
+      followUpDate: '2026-09-20'
+    };
+
+    const shouldAdvance = true;
+    const isAdvancing = shouldAdvance && initialLead.status === 'new';
+    const updatedLead: Partial<Lead> = {
+      ...initialLead,
+      activityLogs: [newLog, ...(initialLead.activityLogs || [])],
+      lastContactedAt: newLog.timestamp,
+      nextFollowUpDate: newLog.followUpDate,
+      lastOutreachChannel: newLog.channel,
+      lastOutreachOutcome: newLog.outcome,
+      status: isAdvancing ? 'outreach_triggered' : initialLead.status,
+      currentState: isAdvancing ? 'OUTREACH_TRIGGERED' : initialLead.currentState
+    };
+
+    assert.equal(updatedLead.status, 'outreach_triggered');
+    assert.equal(updatedLead.currentState, 'OUTREACH_TRIGGERED');
+    assert.equal(updatedLead.lastOutreachChannel, 'in_person_visit');
+    assert.equal(updatedLead.lastOutreachOutcome, 'in_person_meeting');
+    assert.equal(updatedLead.lastContactedAt, '2026-09-07T10:00:00Z');
+    assert.equal(updatedLead.nextFollowUpDate, '2026-09-20');
+    assert.equal(updatedLead.activityLogs?.length, 1);
+  });
+
+  await t.test('preserves advanced pipeline stage (e.g. in_loi) when recording follow-up touchpoint', () => {
+    const loiLead: Partial<Lead> = {
+      id: 'lead_loi_42',
+      status: 'in_loi',
+      currentState: 'APPROVAL_REQUIRED',
+      activityLogs: []
+    };
+
+    const followUpLog: ActivityLog = {
+      id: 'log_loi_42',
+      timestamp: '2026-09-07T11:00:00Z',
+      userId: 'partner_1',
+      userName: 'Investment Director',
+      action: 'Outreach: Email (Sent Deal Teaser / NDA)',
+      channel: 'email',
+      outcome: 'sent_teaser',
+      notes: 'Sent formal LOI draft and diligence questionnaire.'
+    };
+
+    const shouldAdvance = true;
+    const isAdvancing = shouldAdvance && loiLead.status === 'new';
+    const updatedLead: Partial<Lead> = {
+      ...loiLead,
+      activityLogs: [followUpLog, ...(loiLead.activityLogs || [])],
+      lastContactedAt: followUpLog.timestamp,
+      lastOutreachChannel: followUpLog.channel,
+      lastOutreachOutcome: followUpLog.outcome,
+      status: isAdvancing ? 'outreach_triggered' : loiLead.status,
+      currentState: isAdvancing ? 'OUTREACH_TRIGGERED' : loiLead.currentState
+    };
+
+    assert.equal(updatedLead.status, 'in_loi');
+    assert.equal(updatedLead.currentState, 'APPROVAL_REQUIRED');
+    assert.equal(updatedLead.lastOutreachChannel, 'email');
+    assert.equal(updatedLead.lastOutreachOutcome, 'sent_teaser');
   });
 });
