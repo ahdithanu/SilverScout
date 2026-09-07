@@ -8,7 +8,7 @@ import { TaskQueueManager } from '../../server/queue';
 import { getIndustryBenchmark, calculateLeadPercentiles } from '../utils/benchmarks';
 import { formatHubSpotDealPayload, syncLeadToCRM } from '../utils/crmSync';
 import { parseFinancialStatementText } from '../utils/pdfParser';
-import { calculateHaversineDistanceMiles, filterLeadsByRadius, optimizeScoutDrivingRoute } from '../utils/geoRouting';
+import { calculateHaversineDistanceMiles, filterLeadsByRadius, optimizeScoutDrivingRoute, resolveLocationCoordinates, getLeadCoordinates } from '../utils/geoRouting';
 import { formatBigQueryLeadQuery } from '../../server/bigquery';
 import { validateFundBranding, validateFundDeploymentConfig, DEFAULT_FUND_BRANDING, DEFAULT_FUND_DEPLOYMENT_CONFIG } from '../utils/branding';
 import { canTransitionStage, executeStateTransition } from '../../server/fsm';
@@ -219,6 +219,55 @@ test('Geospatial Distance & Deal Scout Route Optimizer', async (t) => {
     assert.ok(itinerary.totalDistanceMiles > 0);
     assert.ok(itinerary.estimatedDriveMinutes > 0);
     assert.ok(itinerary.googleMapsUrl.includes('google.com/maps/dir'));
+  });
+
+  await t.test('resolves 5-digit US postal ZIP codes accurately across regions', () => {
+    // 90210 -> Beverly Hills / Los Angeles region (~34.0, -118.2)
+    const beverlyHills = resolveLocationCoordinates('90210');
+    assert.ok(beverlyHills.lat > 33.0 && beverlyHills.lat < 35.0, `90210 lat ${beverlyHills.lat}`);
+    assert.ok(beverlyHills.lng < -117.0 && beverlyHills.lng > -119.5, `90210 lng ${beverlyHills.lng}`);
+
+    // 33602 -> Tampa, FL region (~27.9, -82.4)
+    const tampaZip = resolveLocationCoordinates('Tampa, FL 33602');
+    assert.ok(tampaZip.lat > 27.0 && tampaZip.lat < 29.0, `33602 lat ${tampaZip.lat}`);
+    assert.ok(tampaZip.lng < -81.5 && tampaZip.lng > -83.5, `33602 lng ${tampaZip.lng}`);
+
+    // 10001 -> New York, NY region (~40.7, -73.9)
+    const nycZip = resolveLocationCoordinates('10001');
+    assert.ok(nycZip.lat > 40.0 && nycZip.lat < 41.5, `10001 lat ${nycZip.lat}`);
+    assert.ok(nycZip.lng < -73.0 && nycZip.lng > -75.0, `10001 lng ${nycZip.lng}`);
+
+    // 78701 -> Austin, TX region (~30.2, -97.7)
+    const austinZip = resolveLocationCoordinates('Austin TX 78701');
+    assert.ok(austinZip.lat > 29.0 && austinZip.lat < 31.0, `78701 lat ${austinZip.lat}`);
+    assert.ok(austinZip.lng < -96.5 && austinZip.lng > -99.0, `78701 lng ${austinZip.lng}`);
+  });
+
+  await t.test('resolves US state centroids and nationwide metropolitan hubs', () => {
+    const texas = resolveLocationCoordinates('Texas');
+    assert.ok(texas.lat >= 30.0 && texas.lat <= 33.0, `Texas lat: ${texas.lat}`);
+    assert.ok(texas.lng >= -101.0 && texas.lng <= -97.0, `Texas lng: ${texas.lng}`);
+
+    const florida = resolveLocationCoordinates('FL');
+    assert.ok(florida.lat >= 27.0 && florida.lat <= 29.0, `FL lat: ${florida.lat}`);
+
+    const seattle = resolveLocationCoordinates('Seattle');
+    assert.ok(seattle.lat > 47.0 && seattle.lng < -122.0, `Seattle coords: ${JSON.stringify(seattle)}`);
+
+    const miami = resolveLocationCoordinates('Miami, FL');
+    assert.ok(miami.lat > 25.0 && miami.lng < -80.0, `Miami coords: ${JSON.stringify(miami)}`);
+  });
+
+  await t.test('disperses businesses in the same city to prevent map coordinate stacking', () => {
+    const leadA: any = { id: 'l1', name: 'Alpha Mechanical', location: 'Tampa, FL' };
+    const leadB: any = { id: 'l2', name: 'Beta Plumbing', location: 'Tampa, FL' };
+
+    const coordsA = getLeadCoordinates(leadA);
+    const coordsB = getLeadCoordinates(leadB);
+
+    assert.notDeepEqual(coordsA, coordsB, 'Leads in the same city should have distinct dispersed coordinates');
+    const separation = calculateHaversineDistanceMiles(coordsA.lat, coordsA.lng, coordsB.lat, coordsB.lng);
+    assert.ok(separation > 0.5 && separation < 15.0, `Separation ${separation} miles should be realistic sub-metro radius`);
   });
 });
 
