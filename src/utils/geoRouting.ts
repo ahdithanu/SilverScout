@@ -22,6 +22,8 @@ export const CITY_COORDINATES: Record<string, GeoCoordinates> = {
   'Oakland, CA': { lat: 37.8044, lng: -122.2712 },
   'Anaheim, CA': { lat: 33.8366, lng: -117.9143 },
   'Riverside, CA': { lat: 33.9806, lng: -117.3755 },
+  'Long Beach, CA': { lat: 33.7701, lng: -118.1937 },
+  'Irvine, CA': { lat: 33.6846, lng: -117.8265 },
 
   // Texas
   'Dallas, TX': { lat: 32.7767, lng: -96.7970 },
@@ -32,22 +34,40 @@ export const CITY_COORDINATES: Record<string, GeoCoordinates> = {
   'El Paso, TX': { lat: 31.7619, lng: -106.4850 },
   'Arlington, TX': { lat: 32.7357, lng: -97.1081 },
   'Plano, TX': { lat: 33.0198, lng: -96.6989 },
+  'Lubbock, TX': { lat: 33.5779, lng: -101.8552 },
+  'Corpus Christi, TX': { lat: 27.8006, lng: -97.3964 },
 
   // Southeast & Florida
   'Atlanta, GA': { lat: 33.7490, lng: -84.3880 },
+  'Savannah, GA': { lat: 32.0809, lng: -81.0912 },
+  'Augusta, GA': { lat: 33.4735, lng: -82.0105 },
   'Miami, FL': { lat: 25.7617, lng: -80.1918 },
   'Orlando, FL': { lat: 28.5383, lng: -81.3792 },
   'Tampa, FL': { lat: 27.9506, lng: -82.4572 },
+  'St. Petersburg, FL': { lat: 27.7676, lng: -82.6403 },
+  'Clearwater, FL': { lat: 27.9659, lng: -82.8001 },
   'Jacksonville, FL': { lat: 30.3322, lng: -81.6557 },
+  'Fort Lauderdale, FL': { lat: 26.1224, lng: -80.1373 },
+  'West Palm Beach, FL': { lat: 26.7153, lng: -80.0534 },
   'Charlotte, NC': { lat: 35.2271, lng: -80.8431 },
   'Raleigh, NC': { lat: 35.7796, lng: -78.6382 },
+  'Greensboro, NC': { lat: 36.0726, lng: -79.7920 },
+  'Durham, NC': { lat: 35.9940, lng: -78.8986 },
   'Nashville, TN': { lat: 36.1627, lng: -86.7816 },
   'Memphis, TN': { lat: 35.1495, lng: -90.0490 },
+  'Knoxville, TN': { lat: 35.9606, lng: -83.9207 },
+  'Chattanooga, TN': { lat: 35.0456, lng: -85.3097 },
   'Birmingham, AL': { lat: 33.5186, lng: -86.8104 },
+  'Huntsville, AL': { lat: 34.7304, lng: -86.5861 },
   'Charleston, SC': { lat: 32.7765, lng: -79.9311 },
+  'Columbia, SC': { lat: 34.0007, lng: -81.0348 },
+  'Greenville, SC': { lat: 34.8526, lng: -82.3940 },
   'Richmond, VA': { lat: 37.5407, lng: -77.4360 },
+  'Virginia Beach, VA': { lat: 36.8529, lng: -75.9780 },
   'Louisville, KY': { lat: 38.2527, lng: -85.7585 },
+  'Lexington, KY': { lat: 38.0406, lng: -84.5037 },
   'New Orleans, LA': { lat: 29.9511, lng: -90.0715 },
+  'Baton Rouge, LA': { lat: 30.4515, lng: -91.1871 },
 
   // Southwest & Mountain
   'Phoenix, AZ': { lat: 33.4484, lng: -112.0740 },
@@ -56,27 +76,37 @@ export const CITY_COORDINATES: Record<string, GeoCoordinates> = {
   'Scottsdale, AZ': { lat: 33.4942, lng: -111.9261 },
   'Denver, CO': { lat: 39.7392, lng: -104.9903 },
   'Colorado Springs, CO': { lat: 38.8339, lng: -104.8214 },
+  'Fort Collins, CO': { lat: 40.5853, lng: -105.0844 },
   'Salt Lake City, UT': { lat: 40.7608, lng: -111.8910 },
+  'Provo, UT': { lat: 40.2338, lng: -111.6585 },
   'Las Vegas, NV': { lat: 36.1699, lng: -115.1398 },
   'Reno, NV': { lat: 39.5296, lng: -119.8138 },
   'Albuquerque, NM': { lat: 35.0844, lng: -106.6504 },
+  'Santa Fe, NM': { lat: 35.6870, lng: -105.9378 },
   'Boise, ID': { lat: 43.6150, lng: -116.2023 },
 
   // Midwest
   'Chicago, IL': { lat: 41.8781, lng: -87.6298 },
+  'Naperville, IL': { lat: 41.7508, lng: -88.1535 },
+  'Peoria, IL': { lat: 40.6936, lng: -89.5890 },
   'Indianapolis, IN': { lat: 39.7684, lng: -86.1581 },
+  'Fort Wayne, IN': { lat: 41.0793, lng: -85.1394 },
   'Columbus, OH': { lat: 39.9612, lng: -82.9988 },
   'Cleveland, OH': { lat: 41.4993, lng: -81.6944 },
   'Cincinnati, OH': { lat: 39.1031, lng: -84.5120 },
   'Detroit, MI': { lat: 42.3314, lng: -83.0458 },
+  'Grand Rapids, MI': { lat: 42.9634, lng: -85.6681 },
   'Minneapolis, MN': { lat: 44.9778, lng: -93.2650 },
+  'St. Paul, MN': { lat: 44.9537, lng: -93.0900 },
   'St. Louis, MO': { lat: 38.6270, lng: -90.1994 },
   'Kansas City, MO': { lat: 39.0997, lng: -94.5786 },
   'Milwaukee, WI': { lat: 43.0389, lng: -87.9065 },
+  'Madison, WI': { lat: 43.0731, lng: -89.4012 },
   'Omaha, NE': { lat: 41.2565, lng: -95.9345 },
   'Des Moines, IA': { lat: 41.5868, lng: -93.6250 },
   'Oklahoma City, OK': { lat: 35.4676, lng: -97.5164 },
   'Tulsa, OK': { lat: 36.1540, lng: -95.9928 },
+  'Wichita, KS': { lat: 37.6872, lng: -97.3301 },
 
   // Northeast & Mid-Atlantic
   'New York, NY': { lat: 40.7128, lng: -74.0060 },
@@ -87,12 +117,17 @@ export const CITY_COORDINATES: Record<string, GeoCoordinates> = {
   'Baltimore, MD': { lat: 39.2904, lng: -76.6122 },
   'Newark, NJ': { lat: 40.7357, lng: -74.1724 },
   'Buffalo, NY': { lat: 42.8864, lng: -78.8784 },
+  'Hartford, CT': { lat: 41.7658, lng: -72.6734 },
+  'Providence, RI': { lat: 41.8240, lng: -71.4128 },
 
   // Pacific Northwest
   'Seattle, WA': { lat: 47.6062, lng: -122.3321 },
   'Tacoma, WA': { lat: 47.2529, lng: -122.4443 },
+  'Spokane, WA': { lat: 47.6588, lng: -117.4260 },
   'Portland, OR': { lat: 45.5152, lng: -122.6784 },
-  'Spokane, WA': { lat: 47.6588, lng: -117.4260 }
+  'Eugene, OR': { lat: 44.0521, lng: -123.0868 },
+  'Anchorage, AK': { lat: 61.2181, lng: -149.9003 },
+  'Honolulu, HI': { lat: 21.3069, lng: -157.8583 }
 };
 
 // State centroids for resolving non-listed cities to their proper state bounds
@@ -164,9 +199,10 @@ export function calculateHaversineDistanceMiles(lat1: number, lon1: number, lat2
 /**
  * Flexible, resilient location resolver that parses:
  * 1. Direct city matches in CITY_COORDINATES
- * 2. Partial city matches (e.g. "Dallas" -> Dallas, TX)
- * 3. State identification (e.g. "Tyler, TX" places within Texas rather than defaulting to California)
- * 4. Deterministic hash placement within the target state or national boundary
+ * 2. Case-insensitive and normalized city & state matches
+ * 3. City name prefix or substring match
+ * 4. State identification (e.g. "Tyler, TX" places within Texas)
+ * 5. Deterministic hash placement within the target state or national boundary
  */
 export function resolveLocationCoordinates(locationStr: string): GeoCoordinates {
   if (!locationStr) {
@@ -175,15 +211,35 @@ export function resolveLocationCoordinates(locationStr: string): GeoCoordinates 
 
   const clean = locationStr.trim();
   const lower = clean.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // 1. Exact match against CITY_COORDINATES
+  // 1. Exact match against CITY_COORDINATES keys
   for (const [cityKey, coords] of Object.entries(CITY_COORDINATES)) {
-    if (cityKey.toLowerCase() === lower) {
+    const keyLower = cityKey.toLowerCase();
+    const keyNorm = keyLower.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (lower === keyLower || normalized === keyNorm) {
       return coords;
     }
   }
 
-  // 2. City name prefix or substring match against known hubs
+  // 2. Direct city name match (e.g. "tampa" -> 'Tampa, FL', "dallas" -> 'Dallas, TX')
+  for (const [cityKey, coords] of Object.entries(CITY_COORDINATES)) {
+    const cityNameOnly = cityKey.split(',')[0].trim().toLowerCase();
+    if (lower === cityNameOnly || normalized === cityNameOnly) {
+      return coords;
+    }
+  }
+
+  // 3. Substring match if input includes city name AND state
+  for (const [cityKey, coords] of Object.entries(CITY_COORDINATES)) {
+    const cityNameOnly = cityKey.split(',')[0].trim().toLowerCase();
+    const stateOnly = cityKey.split(',')[1]?.trim().toLowerCase() || '';
+    if (lower.includes(cityNameOnly) && (stateOnly ? lower.includes(stateOnly) : true)) {
+      return coords;
+    }
+  }
+
+  // 4. City name substring match
   for (const [cityKey, coords] of Object.entries(CITY_COORDINATES)) {
     const cityNameOnly = cityKey.split(',')[0].trim().toLowerCase();
     if (lower.includes(cityNameOnly)) {
@@ -191,13 +247,13 @@ export function resolveLocationCoordinates(locationStr: string): GeoCoordinates 
     }
   }
 
-  // 3. State code extraction (e.g. "Tyler, TX", "Naperville, IL", "Macon GA")
-  const stateCodeMatch = clean.match(/\b([A-Z]{2})\b/) || clean.match(/,\s*([A-Za-z]{2})/);
+  // 5. State code extraction (e.g. "FL", "TX", "CA", "Tyler TX")
+  const stateCodeMatch = clean.match(/\b([A-Za-z]{2})\b/);
   if (stateCodeMatch) {
     const code = stateCodeMatch[1].toUpperCase();
     if (US_STATE_CENTROIDS[code]) {
       const state = US_STATE_CENTROIDS[code];
-      const hash = clean.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const hash = clean.split('').reduce((acc, char, i) => acc + char.charCodeAt(0) * (i + 1), 0);
       const latOffset = ((hash % 100) - 50) / 75;
       const lngOffset = (((hash * 7) % 100) - 50) / 75;
       return {
@@ -207,10 +263,10 @@ export function resolveLocationCoordinates(locationStr: string): GeoCoordinates 
     }
   }
 
-  // 4. State full name extraction (e.g. "Dallas Texas", "Tampa Florida")
+  // 6. State full name extraction (e.g. "Dallas Texas", "Tampa Florida")
   for (const [code, state] of Object.entries(US_STATE_CENTROIDS)) {
     if (lower.includes(state.name.toLowerCase())) {
-      const hash = clean.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const hash = clean.split('').reduce((acc, char, i) => acc + char.charCodeAt(0) * (i + 1), 0);
       const latOffset = ((hash % 100) - 50) / 75;
       const lngOffset = (((hash * 7) % 100) - 50) / 75;
       return {
@@ -220,10 +276,10 @@ export function resolveLocationCoordinates(locationStr: string): GeoCoordinates 
     }
   }
 
-  // 5. Fallback deterministic placement within continental US
-  const hash = clean.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  // 7. Fallback deterministic placement within continental US
+  const hash = clean.split('').reduce((acc, char, i) => acc + char.charCodeAt(0) * (i + 1), 0);
   const lat = 32.0 + ((hash % 140) / 10);
-  const lng = -120.0 + ((hash % 450) / 10);
+  const lng = -118.0 + ((hash % 420) / 10);
   return {
     lat: Number(lat.toFixed(4)),
     lng: Number(lng.toFixed(4))
@@ -231,7 +287,22 @@ export function resolveLocationCoordinates(locationStr: string): GeoCoordinates 
 }
 
 export function getLeadCoordinates(lead: Lead): GeoCoordinates {
-  return resolveLocationCoordinates(lead.location);
+  const baseCoords = resolveLocationCoordinates(lead.location);
+  if (!lead.name) return baseCoords;
+
+  // Apply deterministic sub-metro dispersion so multiple businesses in the same city
+  // (e.g. 10 businesses in Tampa, FL) are spread 1.5 to 8.5 miles across the metro area
+  // instead of stacking on the identical pixel coordinate with '+0 mi from prev'
+  const seed = (lead.name + (lead.id || '')).split('').reduce((acc, char, idx) => acc + char.charCodeAt(0) * (idx + 1), 0);
+  const angle = (seed % 360) * (Math.PI / 180);
+  const distanceMiles = 1.5 + ((seed % 70) / 10); // 1.5 to 8.5 miles
+  const latOffset = (distanceMiles / 69.0) * Math.cos(angle);
+  const lngOffset = (distanceMiles / (69.0 * Math.cos(Math.max(0.2, baseCoords.lat * (Math.PI / 180))))) * Math.sin(angle);
+
+  return {
+    lat: Number((baseCoords.lat + latOffset).toFixed(4)),
+    lng: Number((baseCoords.lng + lngOffset).toFixed(4))
+  };
 }
 
 /**

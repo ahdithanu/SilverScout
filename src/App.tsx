@@ -1360,11 +1360,12 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
     setActiveTab('dashboard');
   };
 
-  const handleCitySearch = async () => {
-    if (!citySearchQuery.trim()) return;
+  const handleCitySearch = async (overrideCity?: string, stayOnTab?: boolean) => {
+    const city = (overrideCity || citySearchQuery).trim();
+    if (!city) return;
     setIsSearchingCity(true);
     try {
-      const results = await searchBusinessesBatch(citySearchQuery, batchVolumeTier);
+      const results = await searchBusinessesBatch(city, batchVolumeTier);
       const newLeads: Lead[] = results.map((res, idx) => ({
         id: `lead-${Date.now()}-${idx}-${Math.random().toString(36).substring(7)}`,
         fundId: 'redwood-cap',
@@ -1381,8 +1382,12 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
       if (newLeads.length > 0) {
         setSelectedLead(newLeads[0]);
       }
-      setCitySearchQuery('');
-      setActiveTab('dashboard');
+      if (!overrideCity) {
+        setCitySearchQuery('');
+      }
+      if (!stayOnTab) {
+        setActiveTab('dashboard');
+      }
 
       // Background persist to Firestore only if user is authenticated with real Firebase Auth
       if (user && !user.uid.startsWith('demo-')) {
@@ -1393,6 +1398,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
           })
         ).catch(e => console.warn("Firestore background sync:", e));
       }
+      return newLeads;
     } catch (err) {
       console.error("City Search Error:", err);
     } finally {
@@ -3605,6 +3611,11 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
               <TerritoryMap
                 leads={leads}
                 onSelectLead={(lead) => setSelectedLead(lead)}
+                onScanCity={async (city) => {
+                  await handleCitySearch(city, true);
+                }}
+                isScanningCity={isSearchingCity}
+                searchQuery={searchQuery}
               />
             </div>
           )}

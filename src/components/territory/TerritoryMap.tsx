@@ -34,38 +34,68 @@ import {
 interface TerritoryMapProps {
   leads: Lead[];
   onSelectLead: (lead: Lead) => void;
+  onScanCity?: (cityName: string) => Promise<void>;
+  isScanningCity?: boolean;
+  searchQuery?: string;
 }
 
 export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   leads,
-  onSelectLead
+  onSelectLead,
+  onScanCity,
+  isScanningCity = false,
+  searchQuery = ''
 }) => {
   // Dynamically default hub to the city with highest lead density, or Dallas, TX
   const [selectedHub, setSelectedHub] = useState<string>(() => detectDominantCityHub(leads));
-  const [customHubInput, setCustomHubInput] = useState<string>('');
-  const [isCustomHubMode, setIsCustomHubMode] = useState<boolean>(false);
+  const [locationInput, setLocationInput] = useState<string>(selectedHub);
   const [radiusMiles, setRadiusMiles] = useState<number>(100); // 25, 50, 100, 250, or Infinity
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [itinerary, setItinerary] = useState<OptimizedRouteItinerary | null>(null);
   const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
 
-  // Re-evaluate dominant hub if leads change and current hub has zero leads
-  useEffect(() => {
-    if (leads.length > 0) {
-      const activeHubs = extractAvailableHubs(leads);
-      const currentHubMatches = activeHubs.some(h => 
-        selectedHub.toLowerCase().includes(h.name.split(',')[0].toLowerCase())
-      );
-      if (!currentHubMatches && activeHubs.length > 0) {
-        setSelectedHub(activeHubs[0].name);
-      }
-    }
-  }, [leads]);
-
   // Extract all distinct active market cities from currently loaded leads
   const activeLeadMarkets = useMemo(() => {
     return extractAvailableHubs(leads);
   }, [leads]);
+
+  // Keep location input text in sync when selectedHub changes
+  useEffect(() => {
+    setLocationInput(selectedHub);
+  }, [selectedHub]);
+
+  // Re-evaluate dominant hub if leads change and current hub has zero leads within radius
+  useEffect(() => {
+    if (leads.length > 0) {
+      const activeHubs = extractAvailableHubs(leads);
+      const hubCoords = resolveLocationCoordinates(selectedHub);
+      const hasNearbyLead = leads.some(l => {
+        const c = getLeadCoordinates(l);
+        return calculateHaversineDistanceMiles(hubCoords.lat, hubCoords.lng, c.lat, c.lng) <= 150;
+      });
+
+      if (!hasNearbyLead && activeHubs.length > 0) {
+        setSelectedHub(activeHubs[0].name);
+        setLocationInput(activeHubs[0].name);
+      }
+    }
+  }, [leads]);
+
+  // Sync with global header search query if user typed a location
+  useEffect(() => {
+    if (searchQuery && searchQuery.trim()) {
+      const q = searchQuery.trim();
+      const matchingMarket = activeLeadMarkets.find(m => m.name.toLowerCase().includes(q.toLowerCase()));
+      if (matchingMarket) {
+        setSelectedHub(matchingMarket.name);
+        setLocationInput(matchingMarket.name);
+      } else {
+        setSelectedHub(q);
+        setLocationInput(q);
+      }
+      setItinerary(null);
+    }
+  }, [searchQuery, activeLeadMarkets]);
 
   // Coordinates of the selected hub
   const hubCoords = useMemo(() => {
@@ -153,13 +183,24 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     return project(hubCoords.lat, hubCoords.lng);
   }, [hubCoords, bounds]);
 
-  const handleApplyCustomHub = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (customHubInput.trim()) {
-      setSelectedHub(customHubInput.trim());
-      setIsCustomHubMode(false);
-      setCustomHubInput('');
+  const handleApplyLocation = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = locationInput.trim();
+    if (!clean) return;
+    setSelectedHub(clean);
+    setItinerary(null);
+  };
+
+  const handleScoutCurrentLocation = async (targetCity?: string) => {
+    const city = targetCity || selectedHub || locationInput;
+    if (!city.trim() || !onScanCity) return;
+    try {
+      await onScanCity(city.trim());
+      setSelectedHub(city.trim());
+      setLocationInput(city.trim());
       setItinerary(null);
+    } catch (err) {
+      console.error("Failed to scout location:", err);
     }
   };
 
@@ -200,88 +241,73 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             </div>
           </div>
 
-          {/* Departure Hub Controls */}
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-400 flex items-center gap-1 font-medium">
-                <Target className="h-3.5 w-3.5 text-emerald-400" />
-                Departure Hub:
-              </span>
+          {/* Location & Departure Hub Controls */}
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            {/* Direct City Search & Set Input */}
+            <form onSubmit={handleApplyLocation} className="flex items-center gap-1.5">
+              <div className="relative">
+                <MapPin className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+                <input
+                  type="text"
+                  value={locationInput}
+                  onChange={(e) => setLocationInput(e.target.value)}
+                  placeholder="Enter any US city (e.g. Tampa, FL, Dallas, TX)..."
+                  className="w-56 rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 pl-8 pr-3 text-xs font-semibold text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                className="rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-1.5 font-bold text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                title="Map this location and center radar"
+              >
+                Set Hub
+              </button>
+            </form>
 
-              {isCustomHubMode ? (
-                <form onSubmit={handleApplyCustomHub} className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    value={customHubInput}
-                    onChange={(e) => setCustomHubInput(e.target.value)}
-                    placeholder="Enter city, state or address..."
-                    autoFocus
-                    className="w-52 rounded-lg border border-emerald-500/50 bg-zinc-900 px-2.5 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                  />
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white hover:bg-emerald-500 transition-colors"
-                  >
-                    Set
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsCustomHubMode(false)}
-                    className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-zinc-300 hover:text-white"
-                  >
-                    ✕
-                  </button>
-                </form>
-              ) : (
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={selectedHub}
-                    onChange={(e) => {
-                      if (e.target.value === '__custom__') {
-                        setIsCustomHubMode(true);
-                      } else {
-                        setSelectedHub(e.target.value);
-                        setItinerary(null);
-                      }
-                    }}
-                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-semibold text-white focus:outline-none focus:border-emerald-500/50"
-                  >
-                    {activeLeadMarkets.length > 0 && (
-                      <optgroup label="📍 Active Markets With Leads">
-                        {activeLeadMarkets.map(m => (
-                          <option key={m.name} value={m.name}>
-                            {m.name} ({m.count} {m.count === 1 ? 'target' : 'targets'})
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-
-                    <optgroup label="🇺🇸 Nationwide Metropolitan Hubs">
-                      {Object.keys(CITY_COORDINATES).map(city => (
-                        <option key={city} value={city}>{city}</option>
-                      ))}
-                    </optgroup>
-
-                    <optgroup label="✏️ Custom Location">
-                      <option value="__custom__">+ Enter Custom City or Address...</option>
-                    </optgroup>
-                  </select>
-
-                  <button
-                    onClick={() => setIsCustomHubMode(true)}
-                    title="Type any custom address or city"
-                    className="rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 hover:text-emerald-400 hover:border-zinc-700 transition-colors"
-                  >
-                    <Search className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+            {/* Quick Hub Dropdown Selector */}
+            <select
+              value={selectedHub}
+              onChange={(e) => {
+                setSelectedHub(e.target.value);
+                setLocationInput(e.target.value);
+                setItinerary(null);
+              }}
+              className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 font-medium text-xs text-zinc-300 focus:outline-none focus:border-emerald-500"
+            >
+              {activeLeadMarkets.length > 0 && (
+                <optgroup label="📍 Active Markets With Leads">
+                  {activeLeadMarkets.map(m => (
+                    <option key={m.name} value={m.name}>
+                      {m.name} ({m.count} {m.count === 1 ? 'target' : 'targets'})
+                    </option>
+                  ))}
+                </optgroup>
               )}
-            </div>
+
+              <optgroup label="🇺🇸 Nationwide Metropolitan Hubs">
+                {Object.keys(CITY_COORDINATES).map(city => (
+                  <option key={city} value={city}>{city}</option>
+                ))}
+              </optgroup>
+            </select>
+
+            {/* 1-Click City Scanner Button */}
+            {onScanCity && (
+              <button
+                onClick={() => handleScoutCurrentLocation()}
+                disabled={isScanningCity}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 font-bold text-white shadow-md hover:bg-emerald-500 disabled:opacity-50 transition-colors"
+                title={`Scan and ingest high-propensity off-market businesses in ${selectedHub}`}
+              >
+                {isScanningCity ? <Clock className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                {isScanningCity ? 'Scouting Deals...' : `⚡ Scout Deals in ${selectedHub.split(',')[0]}`}
+              </button>
+            )}
 
             <button
               onClick={handleGenerateItinerary}
               disabled={isOptimizing || leads.length === 0}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 font-bold text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-1.5 font-bold text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
             >
               <Route className="h-3.5 w-3.5" />
               {isOptimizing ? 'Computing Route...' : 'Optimize Scout Itinerary'}
@@ -302,6 +328,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                     key={m.name}
                     onClick={() => {
                       setSelectedHub(m.name);
+                      setLocationInput(m.name);
                       setItinerary(null);
                     }}
                     className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all whitespace-nowrap flex items-center gap-1 ${
@@ -551,32 +578,45 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           {filteredLeads.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center p-6 bg-zinc-950/75 backdrop-blur-sm">
               <div className="max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-center space-y-4 shadow-2xl">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-400">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
                   <Target className="h-6 w-6" />
                 </div>
                 <div>
                   <h4 className="font-bold text-white text-base">No Targets Within {radiusMiles} Miles</h4>
                   <p className="text-xs text-zinc-400 mt-1">
                     No leads are currently located within {radiusMiles} miles of <strong>{selectedHub}</strong>. 
-                    {leads.length > 0 && ` We found ${leads.length} total targets across other regions.`}
+                    {leads.length > 0 && ` We found ${leads.length} total targets across other regions (${activeLeadMarkets.map(m => m.name.split(',')[0]).slice(0, 3).join(', ')}).`}
                   </p>
                 </div>
-                <div className="flex items-center justify-center gap-3">
-                  <button
-                    onClick={() => setRadiusMiles(Infinity)}
-                    className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
-                  >
-                    Show Nationwide Targets ({leads.length})
-                  </button>
+                <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+                  {onScanCity && (
+                    <button
+                      onClick={() => handleScoutCurrentLocation(selectedHub)}
+                      disabled={isScanningCity}
+                      className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 shadow-md transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isScanningCity ? <Clock className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      {isScanningCity ? `Scouting ${selectedHub}...` : `⚡ Scout Deals in ${selectedHub.split(',')[0]}`}
+                    </button>
+                  )}
+                  {leads.length > 0 && (
+                    <button
+                      onClick={() => setRadiusMiles(Infinity)}
+                      className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-bold text-zinc-200 hover:text-white transition-colors"
+                    >
+                      Show Nationwide Targets ({leads.length})
+                    </button>
+                  )}
                   {activeLeadMarkets.length > 0 && (
                     <button
                       onClick={() => {
                         setSelectedHub(activeLeadMarkets[0].name);
+                        setLocationInput(activeLeadMarkets[0].name);
                         setRadiusMiles(100);
                       }}
                       className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-bold text-zinc-200 hover:text-white transition-colors"
                     >
-                      Jump to {activeLeadMarkets[0].name.split(',')[0]}
+                      Jump to {activeLeadMarkets[0].name.split(',')[0]} ({activeLeadMarkets[0].count})
                     </button>
                   )}
                 </div>
