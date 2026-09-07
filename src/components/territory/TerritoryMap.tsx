@@ -30,7 +30,8 @@ import {
   Sparkles,
   Map as MapIcon,
   ChevronDown,
-  X
+  X,
+  Phone
 } from 'lucide-react';
 
 interface TerritoryMapProps {
@@ -866,23 +867,66 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
 
             {/* Selected Lead Mini-Inspector */}
             {selectedLead && (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Selected Target</span>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 space-y-3 shadow-xl">
+                <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                    <Target className="h-3 w-3" /> Selected Business Target
+                  </span>
                   <button onClick={() => setSelectedLead(null)} className="text-zinc-500 hover:text-white text-xs">✕</button>
                 </div>
-                <h4 className="font-bold text-white text-sm">{selectedLead.name}</h4>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-zinc-400">Location: <span className="text-white block truncate">{selectedLead.location}</span></div>
-                  <div className="text-zinc-400">Propensity: <span className="font-bold text-amber-400 block">{selectedLead.exitPropensityScore}/10</span></div>
-                  <div className="text-zinc-400">Industry: <span className="text-white block truncate">{selectedLead.industry}</span></div>
-                  <div className="text-zinc-400">Status: <span className="text-emerald-400 block capitalize">{selectedLead.status}</span></div>
+                
+                <div>
+                  <h4 className="font-bold text-white text-sm">{selectedLead.name}</h4>
+                  <p className="text-[11px] text-zinc-400 mt-0.5 flex items-center gap-1">
+                    <MapPin className="h-3 w-3 text-red-400 flex-shrink-0" />
+                    <span className="truncate">{selectedLead.address || selectedLead.businessProfile?.streetAddress || selectedLead.location}</span>
+                  </p>
                 </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800/80">
+                  <div className="text-zinc-400">
+                    Propensity: <span className="font-bold text-amber-400 block">{selectedLead.exitPropensityScore}/10</span>
+                  </div>
+                  <div className="text-zinc-400">
+                    Team: <span className="text-white block font-semibold">{selectedLead.businessProfile?.employeeCount ? `${selectedLead.businessProfile.employeeCount} staff` : '15-25 est.'}</span>
+                  </div>
+                  <div className="text-zinc-400">
+                    Industry: <span className="text-white block truncate">{selectedLead.industry}</span>
+                  </div>
+                  <div className="text-zinc-400">
+                    Rating: <span className="text-emerald-400 block font-semibold">{selectedLead.businessProfile?.googleRating || 4.6} ★ ({selectedLead.businessProfile?.totalReviews || 40})</span>
+                  </div>
+                </div>
+
+                {/* Quick Phone & Directions Bar */}
+                <div className="flex items-center gap-2">
+                  {(selectedLead.phone || selectedLead.businessProfile?.phone) && (
+                    <a
+                      href={`tel:${selectedLead.phone || selectedLead.businessProfile?.phone}`}
+                      className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-950/40 py-1.5 text-[11px] font-bold text-emerald-300 hover:bg-emerald-900/50 transition-colors"
+                    >
+                      <Phone className="h-3 w-3" />
+                      <span>{selectedLead.phone || selectedLead.businessProfile?.phone}</span>
+                    </a>
+                  )}
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      selectedLead.address || selectedLead.businessProfile?.streetAddress || `${selectedLead.name} ${selectedLead.location}`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-zinc-700 bg-zinc-850 py-1.5 text-[11px] font-bold text-zinc-200 hover:bg-zinc-800 transition-colors"
+                  >
+                    <Navigation className="h-3 w-3 text-amber-400" />
+                    <span>Map Directions</span>
+                  </a>
+                </div>
+
                 <button
                   onClick={() => onSelectLead(selectedLead)}
-                  className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-zinc-800 hover:bg-emerald-600 py-2 text-xs font-bold text-zinc-200 hover:text-white transition-colors"
+                  className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 py-2 text-xs font-bold text-white transition-colors shadow-xs"
                 >
-                  Open Deal Room Details →
+                  Open Full Business Intelligence Dossier →
                 </button>
               </div>
             )}
@@ -892,4 +936,3 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     </div>
   );
 };
-

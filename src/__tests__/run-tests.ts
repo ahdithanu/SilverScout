@@ -17,6 +17,8 @@ import { validateLLMOutputAgainstFinancialFacts } from '../../server/financialGu
 import { AuditProvenanceLedger } from '../../server/auditLedger';
 import { processSendGridWebhookEvent, processHubSpotWebhookEvent } from '../../server/webhooks';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
+import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel } from '../services/geminiService';
+import { generateRegistryBatch } from '../services/registryIngestionService';
 
 test('RBAC Authorization Rules', async (t) => {
   await t.test('allows partners and admins to approve LOIs', () => {
@@ -268,6 +270,61 @@ test('Geospatial Distance & Deal Scout Route Optimizer', async (t) => {
     assert.notDeepEqual(coordsA, coordsB, 'Leads in the same city should have distinct dispersed coordinates');
     const separation = calculateHaversineDistanceMiles(coordsA.lat, coordsA.lng, coordsB.lat, coordsB.lng);
     assert.ok(separation > 0.5 && separation < 15.0, `Separation ${separation} miles should be realistic sub-metro radius`);
+  });
+});
+
+test('Business-Specific Profile & Operational Intelligence', async (t) => {
+  await t.test('resolves local telephone area codes and state license codes accurately', () => {
+    assert.equal(getPhoneAreaCode('Tampa, FL'), '813');
+    assert.equal(getPhoneAreaCode('Miami, FL'), '305');
+    assert.equal(getPhoneAreaCode('Dallas, TX'), '214');
+    assert.equal(getPhoneAreaCode('Sacramento, CA'), '916');
+    assert.equal(getPhoneAreaCode('Chicago, IL'), '312');
+    assert.equal(getStateCode('Austin, TX'), 'TX');
+    assert.equal(getStateCode('Orlando, FL'), 'FL');
+  });
+
+  await t.test('generates specialized commercial core services per trade vertical', () => {
+    const hvacServices = getTradeCoreServices('HVAC & Mechanical');
+    assert.ok(hvacServices.some(s => s.toLowerCase().includes('chiller') || s.toLowerCase().includes('vrf')));
+
+    const plumbingServices = getTradeCoreServices('Commercial Plumbing');
+    assert.ok(plumbingServices.some(s => s.toLowerCase().includes('piping') || s.toLowerCase().includes('hydronic')));
+
+    const propServices = getTradeCoreServices('Property Management');
+    assert.ok(propServices.some(s => s.toLowerCase().includes('asset') || s.toLowerCase().includes('lease')));
+  });
+
+  await t.test('ingests state registry batch leads with rich localized business profiles', () => {
+    const registryBatch = generateRegistryBatch('fl-dbpr-trade');
+    assert.ok(registryBatch.length > 0);
+    const sampleLead = registryBatch[0];
+    
+    assert.ok(sampleLead.address, 'Lead should have a street address');
+    assert.ok(sampleLead.phone, 'Lead should have a contact telephone');
+    assert.ok(sampleLead.email, 'Lead should have a contact email');
+    assert.ok(sampleLead.website, 'Lead should have a website');
+    assert.ok(sampleLead.businessProfile, 'Lead should contain a structured business profile');
+    assert.ok(sampleLead.businessProfile!.employeeCount! > 0, 'Should have positive employee count');
+    assert.ok(sampleLead.businessProfile!.licenseNumber?.includes('FL'), 'Should have FL contractor license');
+  });
+
+  await t.test('enriches business-specific intel with complete operational dossier', async () => {
+    const rawLead: any = {
+      id: 'test-lead-1',
+      name: 'Suncoast Industrial Mechanical',
+      industry: 'HVAC & Mechanical',
+      location: 'Tampa, FL',
+      agentName: 'Arthur Davis',
+      registrationDate: '1996-04-12'
+    };
+
+    const enriched = await enrichBusinessSpecificIntel(rawLead);
+    assert.ok(enriched.businessProfile, 'Enriched update should provide businessProfile');
+    assert.ok(enriched.businessProfile!.phone, 'Enriched profile should have telephone number');
+    assert.ok(enriched.businessProfile!.streetAddress, 'Enriched profile should have physical address');
+    assert.ok(enriched.businessProfile!.coreServices!.length >= 3, 'Enriched profile should specify core services');
+    assert.ok(enriched.businessProfile!.employeeCount! >= 10, 'Enriched profile should have employee headcount');
   });
 });
 

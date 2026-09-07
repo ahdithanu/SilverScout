@@ -1,4 +1,5 @@
-import { Lead } from '../types';
+import { Lead, BusinessProfile } from '../types';
+import { getTradeCoreServices, getPhoneAreaCode, getStateCode, COMMERCIAL_STREETS } from './geminiService';
 
 export interface RegistryBatchSource {
   id: string;
@@ -117,6 +118,43 @@ export function generateRegistryBatch(sourceId: string): Lead[] {
     if (revenue >= 3500000) score += 0.8;
     score = Number(Math.min(9.8, Math.max(4.8, score)).toFixed(1));
 
+    const areaCode = getPhoneAreaCode(city);
+    const stateCode = getStateCode(city);
+    const streetName = COMMERCIAL_STREETS[i % COMMERCIAL_STREETS.length];
+    const streetNum = 1200 + ((i * 135) % 8000);
+    const cleanAddress = `${streetNum} ${streetName}, ${city}`;
+    const cleanPhone = `(${areaCode}) ${320 + (i % 60)}-${2100 + (i % 800)}`;
+    const businessSlug = `${cityName}-${trade.prefix}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanWebsite = `https://www.${businessSlug}.com`;
+    const cleanEmail = `contact@${businessSlug}.com`;
+    const employeeCount = 14 + ((i * 3) % 45);
+    const isRealEstateOrProp = trade.industry.toLowerCase().includes('property') || trade.industry.toLowerCase().includes('multifamily');
+    const unitCount = isRealEstateOrProp ? (160 + ((i * 25) % 400)) : undefined;
+    const occupancyRate = isRealEstateOrProp ? Number((93.5 + (i % 5) * 1.2).toFixed(1)) : undefined;
+    const facilitySqFt = isRealEstateOrProp ? undefined : (9500 + ((i * 1200) % 25000));
+    const fleetSize = isRealEstateOrProp ? undefined : (8 + ((i * 2) % 20));
+
+    const businessProfile: BusinessProfile = {
+      streetAddress: cleanAddress,
+      phone: cleanPhone,
+      email: cleanEmail,
+      website: cleanWebsite,
+      ownerTitle: "Managing Principal & Founder",
+      employeeCount,
+      yearEstablished: regYear,
+      entityType: (i % 3 === 0) ? "S-Corporation" : (i % 3 === 1) ? "LLC" : "C-Corporation",
+      coreServices: getTradeCoreServices(trade.industry),
+      facilitySqFt,
+      fleetSize,
+      unitCount,
+      occupancyRate,
+      googleRating: Number((4.3 + (i % 6) * 0.1).toFixed(1)),
+      totalReviews: 32 + ((i * 7) % 85),
+      licenseNumber: `${stateCode}-REG#${918200 + i}`,
+      bbbRating: 'A+',
+      businessDescription: `State registry certified ${trade.industry} contractor operating from ${cleanAddress}. Founded by ${founder} with an active operating fleet and commercial account portfolio.`
+    };
+
     leads.push({
       id: `lead-reg-${dataset.id}-${i + 1}`,
       fundId: 'redwood-cap',
@@ -138,7 +176,20 @@ export function generateRegistryBatch(sourceId: string): Lead[] {
       valuationEstimate: valuation,
       dealSourceChannel: 'OFF_MARKET_SCOUT',
       status: score >= 8.0 ? 'qualified' : 'new',
-      tags: ['State Registry Batch', dataset.state, `${drop}% Permit Contraction`, `${age}yr Operating Vintage`],
+      
+      // Business-Specific Information
+      phone: cleanPhone,
+      email: cleanEmail,
+      website: cleanWebsite,
+      address: cleanAddress,
+      businessProfile,
+      socialLinks: {
+        website: cleanWebsite,
+        linkedin: `https://www.linkedin.com/company/${businessSlug}`,
+        twitter: `https://twitter.com/${businessSlug}`
+      },
+
+      tags: ['State Registry Batch', dataset.state, `${drop}% Permit Contraction`, `${age}yr Operating Vintage`, `${employeeCount} Staff`],
       aiThesis: `High-volume registry-verified commercial contractor in ${city} founded in ${regYear} (${age} years operating history). Governed by founder-operator (${founder}). Acute ${drop}% permit volume drop signals owner burnout and imminent succession necessity with strong $${(ebitda / 1000).toFixed(0)}k clean EBITDA.`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

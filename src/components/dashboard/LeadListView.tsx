@@ -1,5 +1,5 @@
 import React from 'react';
-import { Building2, MapPin, BarChart3, Calendar } from 'lucide-react';
+import { Building2, MapPin, BarChart3, Calendar, Phone, Users, Star, Globe } from 'lucide-react';
 import { Lead } from '../../types';
 import { Card, Badge, formatStatusLabel } from '../../App';
 
@@ -36,12 +36,36 @@ export const LeadListView: React.FC<LeadListViewProps> = ({ leads, onSelectLead 
                   }>
                     {formatStatusLabel(lead.status)}
                   </Badge>
+                  {(lead.website || lead.businessProfile?.website) && (
+                    <span className="text-zinc-400 hover:text-emerald-600" title="Has Verified Domain">
+                      <Globe className="h-3.5 w-3.5" />
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-col gap-1 mt-1">
-                  <div className="flex items-center gap-3 text-xs text-zinc-500">
-                    <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> {lead.location}</span>
-                    <span className="flex items-center gap-1"><BarChart3 className="h-3 w-3" /> {lead.industry}</span>
-                    <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Reg: {new Date(lead.registrationDate).getFullYear()}</span>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+                    <span className="flex items-center gap-1 font-medium text-zinc-700">
+                      <MapPin className="h-3 w-3 text-red-500" />
+                      {lead.address || lead.businessProfile?.streetAddress || lead.location}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <BarChart3 className="h-3 w-3 text-zinc-400" /> {lead.industry}
+                    </span>
+                    {(lead.phone || lead.businessProfile?.phone) && (
+                      <span className="flex items-center gap-1 font-mono text-zinc-600">
+                        <Phone className="h-3 w-3 text-emerald-600" /> {lead.phone || lead.businessProfile?.phone}
+                      </span>
+                    )}
+                    {lead.businessProfile?.employeeCount && (
+                      <span className="flex items-center gap-1 text-zinc-600">
+                        <Users className="h-3 w-3 text-blue-500" /> {lead.businessProfile.employeeCount} staff
+                      </span>
+                    )}
+                    {lead.businessProfile?.googleRating && (
+                      <span className="flex items-center gap-1 font-semibold text-amber-600">
+                        <Star className="h-3 w-3 fill-amber-500 text-amber-500" /> {lead.businessProfile.googleRating}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

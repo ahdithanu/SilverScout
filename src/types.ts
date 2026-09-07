@@ -113,6 +113,29 @@ export interface DealComment {
   timestamp: string;
 }
 
+export interface BusinessProfile {
+  streetAddress?: string;
+  suite?: string;
+  zipCode?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  ownerTitle?: string;
+  employeeCount?: number;
+  yearEstablished?: number;
+  entityType?: 'LLC' | 'S-Corp' | 'C-Corp' | 'Partnership' | 'Sole Proprietorship' | string;
+  coreServices?: string[];
+  facilitySqFt?: number;
+  fleetSize?: number;
+  unitCount?: number; // For property management & multifamily
+  occupancyRate?: number; // e.g. 94.5%
+  googleRating?: number; // e.g. 4.7
+  totalReviews?: number; // e.g. 88
+  licenseNumber?: string; // e.g. State Certified Mechanical / Electrical Contractor #
+  bbbRating?: string; // e.g. 'A+'
+  businessDescription?: string;
+}
+
 export interface Lead {
   id: string;
   fundId: string; // Multi-Tenant Scoping Key
@@ -139,6 +162,15 @@ export interface Lead {
   stateVersion?: number;
   isPaused?: boolean;
   
+  // Business Specific Profile & Contact Details
+  phone?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+  businessProfile?: BusinessProfile;
+  aiStrengths?: string[];
+  aiWeaknesses?: string[];
+
   revenue?: number;
   ebitda?: number;
   profitMargin?: number;
