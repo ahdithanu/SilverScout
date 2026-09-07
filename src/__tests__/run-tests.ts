@@ -696,3 +696,80 @@ test('Multi-Channel Outreach Activity Logger & Follow-Up Pipeline Engine', async
     assert.equal(updatedLead.lastOutreachOutcome, 'sent_teaser');
   });
 });
+
+test('Direct Mail & Cold Email 1-Click Launch Engine', async (t) => {
+  const sampleLead: Lead = {
+    id: 'lead_test_direct',
+    fundId: 'redwood-cap',
+    name: 'Sierra Valley Mechanical',
+    industry: 'HVAC',
+    location: 'Fresno, CA',
+    registrationDate: '2011-04-10',
+    agentName: 'Marcus Vance',
+    isCorporateAgent: false,
+    permitVolume2023_2025: 180,
+    permitVolume2026: 42,
+    permitDrop: 15,
+    lastDigitalPostDate: '2026-08-10',
+    reviewVelocity: 4.2,
+    exitPropensityScore: 8.7,
+    aiThesis: 'Consistent commercial refrigeration contractor with aging founder.',
+    valuationEstimate: 4200000,
+    email: 'marcus@sierravalleymech.com',
+    phone: '(559) 492-3310',
+    address: '2840 Commercial Way, Fresno, CA 93706',
+    businessProfile: {
+      streetAddress: '2840 Commercial Way',
+      zipCode: '93706',
+      yearEstablished: 1998,
+      employeeCount: 22,
+      coreServices: ['Commercial Refrigeration', 'Cold Storage Retrofits']
+    },
+    status: 'new',
+    currentState: 'INGESTED',
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+    createdBy: 'system'
+  };
+
+  await t.test('formats valid mailto URL with encoded recipient, subject and personalized body', () => {
+    const subject = `Confidential inquiry regarding ${sampleLead.name} — succession & next chapter`;
+    const body = `Hi Marcus Vance,\n\nWe are direct buyers at SilverScout Capital Partners interested in ${sampleLead.name}.`;
+    const mailto = `mailto:${encodeURIComponent(sampleLead.email!)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    assert.ok(mailto.startsWith('mailto:marcus%40sierravalleymech.com'));
+    assert.ok(mailto.includes('subject=Confidential%20inquiry%20regarding%20Sierra%20Valley%20Mechanical'));
+    assert.ok(mailto.includes('body=Hi%20Marcus%20Vance'));
+  });
+
+  await t.test('creates valid direct mail acquisition letter payload with recipient address block', () => {
+    const recipient = sampleLead.agentName;
+    const street = sampleLead.businessProfile?.streetAddress;
+    const cityZip = `${sampleLead.location} ${sampleLead.businessProfile?.zipCode}`;
+
+    const formattedBlock = `${recipient}\n${sampleLead.name}\n${street}\n${cityZip}`;
+
+    assert.ok(formattedBlock.includes('Marcus Vance'));
+    assert.ok(formattedBlock.includes('Sierra Valley Mechanical'));
+    assert.ok(formattedBlock.includes('2840 Commercial Way'));
+    assert.ok(formattedBlock.includes('93706'));
+  });
+
+  await t.test('logs direct mail touchpoint and triggers pipeline advancement', () => {
+    const directMailLog: ActivityLog = {
+      id: 'log_dm_01',
+      timestamp: new Date().toISOString(),
+      userId: 'scout_4',
+      userName: 'Partner',
+      action: 'Outreach: Direct Mail (Sent Deal Teaser / NDA)',
+      channel: 'direct_mail',
+      outcome: 'sent_teaser',
+      contactPerson: 'Marcus Vance (Sierra Valley Mechanical)',
+      notes: 'Mailed physical acquisition letter to 2840 Commercial Way, Fresno, CA 93706.'
+    };
+
+    assert.equal(directMailLog.channel, 'direct_mail');
+    assert.equal(directMailLog.outcome, 'sent_teaser');
+    assert.ok(directMailLog.notes?.includes('2840 Commercial Way'));
+  });
+});

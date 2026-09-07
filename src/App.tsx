@@ -85,6 +85,8 @@ import { TerritoryMap } from './components/territory/TerritoryMap';
 import { PipelineKanban } from './components/dashboard/PipelineKanban';
 import { ICTeaserModal } from './components/modals/ICTeaserModal';
 import { LogTouchpointModal } from './components/outreach/LogTouchpointModal';
+import { ColdEmailModal } from './components/outreach/ColdEmailModal';
+import { DirectMailLetterModal } from './components/outreach/DirectMailLetterModal';
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
 import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
@@ -378,6 +380,8 @@ export default function App() {
   const [icMemoData, setIcMemoData] = useState<ICMemoData | null>(null);
   const [isGeneratingICMemo, setIsGeneratingICMemo] = useState(false);
   const [isLoggingTouchpoint, setIsLoggingTouchpoint] = useState(false);
+  const [isColdEmailModalOpen, setIsColdEmailModalOpen] = useState(false);
+  const [isDirectMailModalOpen, setIsDirectMailModalOpen] = useState(false);
 
   const handleLogTouchpoint = async (touchpointData: Partial<ActivityLog>, shouldAdvanceStage: boolean) => {
     if (!selectedLead) return;
@@ -4823,6 +4827,26 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                       </a>
                     )}
 
+                    {/* Launch Cold Email */}
+                    <button
+                      onClick={() => setIsColdEmailModalOpen(true)}
+                      className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50/90 px-3 py-1.5 text-xs font-bold text-blue-800 shadow-2xs hover:bg-blue-100 hover:border-blue-300 transition-colors"
+                      title="Compose & launch targeted cold outreach email with 1-click mailto: or copy"
+                    >
+                      <Mail className="h-3.5 w-3.5 text-blue-600" />
+                      <span>✉️ Launch Email</span>
+                    </button>
+
+                    {/* Direct Mail Letter */}
+                    <button
+                      onClick={() => setIsDirectMailModalOpen(true)}
+                      className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-1.5 text-xs font-bold text-amber-800 shadow-2xs hover:bg-amber-100 hover:border-amber-300 transition-colors"
+                      title="Generate formal 1-page physical acquisition letter (Golden Letter) for postal mailing"
+                    >
+                      <Send className="h-3.5 w-3.5 text-amber-600" />
+                      <span>📬 Direct Mail</span>
+                    </button>
+
                     {/* Log Outreach Touchpoint */}
                     <button
                       onClick={() => setIsLoggingTouchpoint(true)}
@@ -5698,6 +5722,32 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
           userId={profile?.uid || 'user_1'}
           onClose={() => setIsLoggingTouchpoint(false)}
           onSaveTouchpoint={handleLogTouchpoint}
+        />
+      )}
+
+      {/* 1-Click Cold Email Launch Modal */}
+      {isColdEmailModalOpen && selectedLead && (
+        <ColdEmailModal
+          isOpen={isColdEmailModalOpen}
+          lead={selectedLead}
+          senderName={profile?.displayName || 'Deal Scout / Associate'}
+          senderTitle={profile?.role === 'partner' ? 'Managing Partner' : 'Deal Sourcing & Acquisitions'}
+          fundName="SilverScout Capital Partners"
+          onClose={() => setIsColdEmailModalOpen(false)}
+          onLogTouchpoint={handleLogTouchpoint}
+        />
+      )}
+
+      {/* Direct Mail Physical Acquisition Letter Modal ("Golden Letter") */}
+      {isDirectMailModalOpen && selectedLead && (
+        <DirectMailLetterModal
+          isOpen={isDirectMailModalOpen}
+          lead={selectedLead}
+          fundName="SilverScout Capital Partners, LP"
+          senderName={profile?.displayName || 'Managing Partner'}
+          senderTitle={profile?.role === 'partner' ? 'Managing Partner' : 'Acquisitions Director'}
+          onClose={() => setIsDirectMailModalOpen(false)}
+          onLogTouchpoint={handleLogTouchpoint}
         />
       )}
 
