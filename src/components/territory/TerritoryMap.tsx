@@ -28,7 +28,9 @@ import {
   LocateFixed,
   RotateCcw,
   Sparkles,
-  Map as MapIcon
+  Map as MapIcon,
+  ChevronDown,
+  X
 } from 'lucide-react';
 
 interface TerritoryMapProps {
@@ -49,6 +51,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   // Dynamically default hub to the city with highest lead density, or Dallas, TX
   const [selectedHub, setSelectedHub] = useState<string>(() => detectDominantCityHub(leads));
   const [locationInput, setLocationInput] = useState<string>(selectedHub);
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [radiusMiles, setRadiusMiles] = useState<number>(100); // 25, 50, 100, 250, or Infinity
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [itinerary, setItinerary] = useState<OptimizedRouteItinerary | null>(null);
@@ -58,6 +61,48 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const activeLeadMarkets = useMemo(() => {
     return extractAvailableHubs(leads);
   }, [leads]);
+
+  // Live filter suggestions for the searchable destination combobox
+  const destinationSuggestions = useMemo(() => {
+    const q = locationInput.trim().toLowerCase();
+    const suggestions: Array<{ label: string; value: string; type: 'custom' | 'active' | 'hub'; badge?: string }> = [];
+
+    // 1. Direct custom search option if query is typed
+    if (q.length >= 2) {
+      suggestions.push({
+        label: `Map "${locationInput.trim()}" as Destination Hub`,
+        value: locationInput.trim(),
+        type: 'custom',
+        badge: 'Custom Destination'
+      });
+    }
+
+    // 2. Active markets with loaded leads
+    activeLeadMarkets.forEach(m => {
+      if (!q || m.name.toLowerCase().includes(q) || m.name.split(',')[0].toLowerCase().includes(q)) {
+        suggestions.push({
+          label: m.name,
+          value: m.name,
+          type: 'active',
+          badge: `${m.count} ${m.count === 1 ? 'target' : 'targets'}`
+        });
+      }
+    });
+
+    // 3. Nationwide metropolitan hubs & regional cities
+    Object.keys(CITY_COORDINATES).forEach(city => {
+      if (activeLeadMarkets.some(m => m.name.toLowerCase() === city.toLowerCase())) return;
+      if (!q || city.toLowerCase().includes(q) || city.split(',')[0].toLowerCase().includes(q)) {
+        suggestions.push({
+          label: city,
+          value: city,
+          type: 'hub'
+        });
+      }
+    });
+
+    return suggestions.slice(0, 25);
+  }, [locationInput, activeLeadMarkets]);
 
   // Keep location input text in sync when selectedHub changes
   useEffect(() => {
@@ -183,11 +228,12 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     return project(hubCoords.lat, hubCoords.lng);
   }, [hubCoords, bounds]);
 
-  const handleApplyLocation = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const clean = locationInput.trim();
+  const handleApplyLocation = (customVal?: string) => {
+    const clean = (customVal || locationInput).trim();
     if (!clean) return;
     setSelectedHub(clean);
+    setLocationInput(clean);
+    setIsDropdownOpen(false);
     setItinerary(null);
   };
 
@@ -198,6 +244,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       await onScanCity(city.trim());
       setSelectedHub(city.trim());
       setLocationInput(city.trim());
+      setIsDropdownOpen(false);
       setItinerary(null);
     } catch (err) {
       console.error("Failed to scout location:", err);
@@ -241,55 +288,107 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             </div>
           </div>
 
-          {/* Location & Departure Hub Controls */}
+          {/* Location & Destination Hub Controls */}
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
-            {/* Direct City Search & Set Input */}
-            <form onSubmit={handleApplyLocation} className="flex items-center gap-1.5">
-              <div className="relative">
-                <MapPin className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-                <input
-                  type="text"
-                  value={locationInput}
-                  onChange={(e) => setLocationInput(e.target.value)}
-                  placeholder="Enter any US city (e.g. Tampa, FL, Dallas, TX)..."
-                  className="w-56 rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 pl-8 pr-3 text-xs font-semibold text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
-                />
+            {/* Searchable Destination Hub Combobox */}
+            <div className="relative">
+              <div className="flex items-center gap-1.5">
+                <div className="relative">
+                  <MapPin className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-emerald-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={locationInput}
+                    onChange={(e) => {
+                      setLocationInput(e.target.value);
+                      setIsDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsDropdownOpen(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleApplyLocation();
+                      } else if (e.key === 'Escape') {
+                        setIsDropdownOpen(false);
+                      }
+                    }}
+                    placeholder="Search any destination, city, or address..."
+                    className="w-64 sm:w-72 rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 pl-8 pr-7 text-xs font-semibold text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                  />
+                  {locationInput ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLocationInput('');
+                        setIsDropdownOpen(true);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  ) : (
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-500 pointer-events-none" />
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleApplyLocation()}
+                  className="rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-1.5 font-bold text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                  title="Center radar on this destination"
+                >
+                  Set Hub
+                </button>
               </div>
-              <button
-                type="submit"
-                className="rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-1.5 font-bold text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
-                title="Map this location and center radar"
-              >
-                Set Hub
-              </button>
-            </form>
 
-            {/* Quick Hub Dropdown Selector */}
-            <select
-              value={selectedHub}
-              onChange={(e) => {
-                setSelectedHub(e.target.value);
-                setLocationInput(e.target.value);
-                setItinerary(null);
-              }}
-              className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 font-medium text-xs text-zinc-300 focus:outline-none focus:border-emerald-500"
-            >
-              {activeLeadMarkets.length > 0 && (
-                <optgroup label="📍 Active Markets With Leads">
-                  {activeLeadMarkets.map(m => (
-                    <option key={m.name} value={m.name}>
-                      {m.name} ({m.count} {m.count === 1 ? 'target' : 'targets'})
-                    </option>
-                  ))}
-                </optgroup>
+              {/* Suggestions Popup Menu */}
+              {isDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setIsDropdownOpen(false)} 
+                  />
+                  <div className="absolute left-0 top-full mt-1.5 z-50 w-80 max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900/95 p-1 shadow-2xl backdrop-blur-md">
+                    <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex items-center justify-between">
+                      <span>Select or Type Any Destination</span>
+                      <span className="text-zinc-600 font-normal">Enter to select</span>
+                    </div>
+
+                    {destinationSuggestions.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-zinc-400 italic">
+                        Type any city, state or address to map it
+                      </div>
+                    ) : (
+                      destinationSuggestions.map((item, idx) => (
+                        <button
+                          key={`${item.value}-${idx}`}
+                          type="button"
+                          onClick={() => handleApplyLocation(item.value)}
+                          className={`w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                            selectedHub.toLowerCase() === item.value.toLowerCase()
+                              ? 'bg-emerald-500/20 text-emerald-300 font-bold'
+                              : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <MapPin className={`h-3.5 w-3.5 flex-shrink-0 ${item.type === 'active' ? 'text-emerald-400' : item.type === 'custom' ? 'text-blue-400' : 'text-zinc-400'}`} />
+                            <span className="truncate">{item.label}</span>
+                          </div>
+                          {item.badge && (
+                            <span className={`ml-2 flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                              item.type === 'active'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-blue-500/20 text-blue-300'
+                            }`}>
+                              {item.badge}
+                            </span>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
               )}
-
-              <optgroup label="🇺🇸 Nationwide Metropolitan Hubs">
-                {Object.keys(CITY_COORDINATES).map(city => (
-                  <option key={city} value={city}>{city}</option>
-                ))}
-              </optgroup>
-            </select>
+            </div>
 
             {/* 1-Click City Scanner Button */}
             {onScanCity && (
