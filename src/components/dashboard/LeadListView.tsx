@@ -81,6 +81,11 @@ export const LeadListView: React.FC<LeadListViewProps> = ({ leads, onSelectLead 
                         {lead.lastOutreachOutcome.replace(/_/g, ' ')}
                       </span>
                     )}
+                    {lead.cadenceState && lead.cadenceState.status === 'active' && (
+                      <span className="flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-800 font-bold border border-indigo-200">
+                        ⚡ Step {lead.cadenceState.currentStepIndex + 1}/{lead.cadenceState.totalSteps} ({lead.cadenceState.nextStepChannel.replace(/_/g, ' ')})
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

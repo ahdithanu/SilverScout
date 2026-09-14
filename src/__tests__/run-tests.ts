@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'crypto';
 
 import { canApproveLOI, canTriggerBatchOutreach, canEditValuationParameters } from '../utils/rbac';
 import { calculateLBOMetrics } from '../utils/lboMath';
@@ -15,11 +16,24 @@ import { canTransitionStage, executeStateTransition } from '../../server/fsm';
 import { TransactionalOutboxManager } from '../../server/outbox';
 import { validateLLMOutputAgainstFinancialFacts } from '../../server/financialGuard';
 import { AuditProvenanceLedger } from '../../server/auditLedger';
-import { processSendGridWebhookEvent, processHubSpotWebhookEvent } from '../../server/webhooks';
+import { processSendGridWebhookEvent, processHubSpotWebhookEvent, verifySendGridWebhookSignature, verifyHubSpotWebhookSignature } from '../../server/webhooks';
+import { applySecurityHeaders, authenticateTenant } from '../../server/auth';
+import { createCheckoutSession, createCustomerPortalSession, verifyStripeWebhookSignature, handleStripeWebhookEvent } from '../../server/billing';
+import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
 import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel } from '../services/geminiService';
 import { generateRegistryBatch } from '../services/registryIngestionService';
 import { Lead, ActivityLog, OutreachChannel, OutreachOutcome } from '../types';
+import { 
+  CADENCE_PRESETS, 
+  enrollLeadInCadence, 
+  advanceCadenceStep, 
+  pauseCadence, 
+  resumeCadence, 
+  markCadenceReplied, 
+  isCadenceStepDue, 
+  getDueCadenceTasks 
+} from '../utils/cadenceEngine';
 
 test('RBAC Authorization Rules', async (t) => {
   await t.test('allows partners and admins to approve LOIs', () => {
@@ -773,3 +787,346 @@ test('Direct Mail & Cold Email 1-Click Launch Engine', async (t) => {
     assert.ok(directMailLog.notes?.includes('2840 Commercial Way'));
   });
 });
+
+test('Multi-Touch Outreach Cadence & Sequence Engine', async (t) => {
+  const baseLead: Lead = {
+    id: 'lead_cadence_01',
+    fundId: 'redwood-cap',
+    name: 'CalWest Sheet Metal & HVAC',
+    industry: 'HVAC',
+    location: 'San Jose, CA',
+    registrationDate: '2015-06-12',
+    agentName: 'David Miller',
+    isCorporateAgent: false,
+    permitVolume2023_2025: 140,
+    permitVolume2026: 30,
+    permitDrop: 20,
+    lastDigitalPostDate: '2026-07-15',
+    reviewVelocity: 4.5,
+    exitPropensityScore: 8.9,
+    aiThesis: 'High-volume commercial ductwork fabrication with succession opportunity.',
+    valuationEstimate: 5100000,
+    status: 'new',
+    currentState: 'INGESTED',
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-01T00:00:00Z',
+    createdBy: 'system'
+  };
+
+  const anchorDate = '2026-09-10T12:00:00.000Z';
+
+  await t.test('enrolls lead into Classic 4-Touch PE Search Cadence and initializes step 1', () => {
+    const enrolled = enrollLeadInCadence(baseLead, 'classic_4_touch', anchorDate);
+    
+    assert.ok(enrolled.cadenceState);
+    assert.equal(enrolled.cadenceState.id, 'classic_4_touch');
+    assert.equal(enrolled.cadenceState.status, 'active');
+    assert.equal(enrolled.cadenceState.currentStepIndex, 0);
+    assert.equal(enrolled.cadenceState.totalSteps, 4);
+    assert.equal(enrolled.cadenceState.nextStepChannel, 'email');
+    assert.equal(enrolled.cadenceState.nextStepDueDate, anchorDate);
+    assert.equal(enrolled.status, 'outreach_triggered');
+    assert.equal(enrolled.currentState, 'OUTREACH_TRIGGERED');
+  });
+
+  await t.test('advances cadence through sequential steps with accurate delay calculations', () => {
+    let lead = enrollLeadInCadence(baseLead, 'classic_4_touch', anchorDate);
+
+    // Step 1 -> Step 2 (Phone Call at Day 3)
+    lead = advanceCadenceStep(lead, 'log_email_01', 'Sent founder succession email');
+    assert.equal(lead.cadenceState?.currentStepIndex, 1);
+    assert.equal(lead.cadenceState?.nextStepChannel, 'phone_call');
+    assert.equal(lead.cadenceState?.completedSteps.length, 1);
+    assert.equal(lead.cadenceState?.completedSteps[0].channel, 'email');
+
+    // Expected Day 3 due date: 2026-09-13
+    const day3DueDate = new Date(lead.cadenceState!.nextStepDueDate);
+    assert.equal(day3DueDate.getUTCDate(), 13);
+
+    // Step 2 -> Step 3 (Direct Mail Golden Letter at Day 7)
+    lead = advanceCadenceStep(lead, 'log_call_01', 'Left voicemail with founder');
+    assert.equal(lead.cadenceState?.currentStepIndex, 2);
+    assert.equal(lead.cadenceState?.nextStepChannel, 'direct_mail');
+    assert.equal(lead.cadenceState?.completedSteps.length, 2);
+
+    // Expected Day 7 due date: 2026-09-17
+    const day7DueDate = new Date(lead.cadenceState!.nextStepDueDate);
+    assert.equal(day7DueDate.getUTCDate(), 17);
+
+    // Step 3 -> Step 4 (Partner Executive Follow-Up at Day 14)
+    lead = advanceCadenceStep(lead, 'log_mail_01', 'Mailed physical Golden Letter');
+    assert.equal(lead.cadenceState?.currentStepIndex, 3);
+    assert.equal(lead.cadenceState?.nextStepChannel, 'phone_call');
+
+    // Expected Day 14 due date: 2026-09-24
+    const day14DueDate = new Date(lead.cadenceState!.nextStepDueDate);
+    assert.equal(day14DueDate.getUTCDate(), 24);
+
+    // Step 4 -> Completed
+    lead = advanceCadenceStep(lead, 'log_partner_01', 'Completed partner follow-up call');
+    assert.equal(lead.cadenceState?.status, 'completed');
+    assert.equal(lead.cadenceState?.completedSteps.length, 4);
+  });
+
+  await t.test('pauses and resumes cadence correctly', () => {
+    let lead = enrollLeadInCadence(baseLead, 'classic_4_touch', anchorDate);
+    assert.equal(lead.cadenceState?.status, 'active');
+
+    lead = pauseCadence(lead);
+    assert.equal(lead.cadenceState?.status, 'paused');
+
+    lead = resumeCadence(lead);
+    assert.equal(lead.cadenceState?.status, 'active');
+  });
+
+  await t.test('marks cadence as replied and transitions lead status to qualified', () => {
+    let lead = enrollLeadInCadence(baseLead, 'classic_4_touch', anchorDate);
+    lead = markCadenceReplied(lead, 'Owner responded via email expressing interest in exit valuation');
+
+    assert.equal(lead.cadenceState?.status, 'replied');
+    assert.equal(lead.status, 'qualified');
+  });
+
+  await t.test('calculates due cadence tasks and filters pipeline accurately', () => {
+    // Lead A: due today (2026-09-10)
+    const leadDue = enrollLeadInCadence({ ...baseLead, id: 'lead_due' }, 'classic_4_touch', '2026-09-10T08:00:00.000Z');
+    
+    // Lead B: due in future (Day 7 from today: 2026-09-17)
+    let leadFuture = enrollLeadInCadence({ ...baseLead, id: 'lead_future' }, 'classic_4_touch', '2026-09-10T08:00:00.000Z');
+    leadFuture = advanceCadenceStep(leadFuture); // now at step 2 (day 3: 2026-09-13)
+
+    const todayRef = new Date('2026-09-10T15:00:00.000Z');
+    assert.equal(isCadenceStepDue(leadDue, todayRef), true);
+    assert.equal(isCadenceStepDue(leadFuture, todayRef), false);
+
+    const dueTasks = getDueCadenceTasks([leadDue, leadFuture], todayRef);
+    assert.equal(dueTasks.length, 1);
+    assert.equal(dueTasks[0].lead.id, 'lead_due');
+    assert.equal(dueTasks[0].step.channel, 'email');
+  });
+});
+
+test('Enterprise CISO Security Headers & Policy Enforcement', async (t) => {
+  await t.test('applies strict HSTS, CSP, nosniff, and DENY frame headers', () => {
+    const headers: Record<string, string> = {};
+    const req = {} as any;
+    const res = {
+      setHeader: (k: string, v: string) => {
+        headers[k] = v;
+      }
+    } as any;
+    let nextCalled = false;
+    const next = () => {
+      nextCalled = true;
+    };
+
+    applySecurityHeaders(req, res, next);
+
+    assert.equal(nextCalled, true);
+    assert.equal(headers['X-Content-Type-Options'], 'nosniff');
+    assert.equal(headers['X-Frame-Options'], 'DENY');
+    assert.equal(headers['X-XSS-Protection'], '1; mode=block');
+    assert.ok(headers['Strict-Transport-Security'].includes('max-age=31536000'));
+    assert.ok(headers['Content-Security-Policy'].includes("default-src 'self'"));
+  });
+});
+
+test('Zero-Trust Multi-Tenant Isolation & Authentication Guard', async (t) => {
+  await t.test('rejects unauthenticated requests without Bearer header (401)', () => {
+    const req = { headers: {}, params: { fundId: 'redwood-cap' } } as any;
+    let statusCode = 200;
+    let jsonResponse: any = null;
+    const res = {
+      status: (code: number) => {
+        statusCode = code;
+        return {
+          json: (data: any) => {
+            jsonResponse = data;
+          }
+        };
+      }
+    } as any;
+    let nextCalled = false;
+
+    authenticateTenant(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, false);
+    assert.equal(statusCode, 401);
+    assert.equal(jsonResponse?.error, 'UNAUTHORIZED');
+  });
+
+  await t.test('blocks cross-tenant access when caller fund differs from route fund (403)', () => {
+    // User from fund-b attempts to query fund-a
+    const req = {
+      headers: { authorization: 'Bearer user_123:associate:fund-b' },
+      params: { fundId: 'redwood-cap' }
+    } as any;
+    let statusCode = 200;
+    let jsonResponse: any = null;
+    const res = {
+      status: (code: number) => {
+        statusCode = code;
+        return {
+          json: (data: any) => {
+            jsonResponse = data;
+          }
+        };
+      }
+    } as any;
+    let nextCalled = false;
+
+    authenticateTenant(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, false);
+    assert.equal(statusCode, 403);
+    assert.equal(jsonResponse?.error, 'TENANT_ACCESS_DENIED');
+  });
+
+  await t.test('permits tenant member accessing own fund resources', () => {
+    const req = {
+      headers: { authorization: 'Bearer partner_1:partner:redwood-cap' },
+      params: { fundId: 'redwood-cap' }
+    } as any;
+    let nextCalled = false;
+    const res = {} as any;
+
+    authenticateTenant(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, true);
+    assert.equal(req.user?.fundId, 'redwood-cap');
+    assert.equal(req.user?.role, 'partner');
+  });
+
+  await t.test('allows global admin role cross-tenant audit access', () => {
+    const req = {
+      headers: { authorization: 'Bearer super_admin:admin:central-ops' },
+      params: { fundId: 'redwood-cap' }
+    } as any;
+    let nextCalled = false;
+    const res = {} as any;
+
+    authenticateTenant(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, true);
+    assert.equal(req.user?.role, 'admin');
+  });
+});
+
+test('Cryptographic Webhook HMAC & Replay Attack Defense', async (t) => {
+  const secretKey = 'test-sendgrid-secret-key-12345';
+
+  await t.test('verifies genuine SendGrid HMAC-SHA256 signature', () => {
+    const nowTimestamp = Math.floor(Date.now() / 1000).toString();
+    const rawBody = JSON.stringify([{ event: 'delivered', email: 'owner@sierra-hvac.com', timestamp: Date.now() }]);
+    
+    const hmac = crypto.createHmac('sha256', secretKey);
+    hmac.update(`${nowTimestamp}${rawBody}`);
+    const validSignature = hmac.digest('base64');
+
+    const isValid = verifySendGridWebhookSignature(rawBody, validSignature, nowTimestamp, secretKey);
+    assert.equal(isValid, true);
+  });
+
+  await t.test('rejects forged SendGrid signature', () => {
+    const nowTimestamp = Math.floor(Date.now() / 1000).toString();
+    const rawBody = JSON.stringify([{ event: 'delivered', email: 'owner@sierra-hvac.com' }]);
+    const fakeSignature = 'dGhpcy1pcy1hLWZvcmdlZC1zaWduYXR1cmUtYmFzZTY0';
+
+    const isValid = verifySendGridWebhookSignature(rawBody, fakeSignature, nowTimestamp, secretKey);
+    assert.equal(isValid, false);
+  });
+
+  await t.test('rejects replay attack with expired timestamp (>300s)', () => {
+    const expiredTimestamp = (Math.floor(Date.now() / 1000) - 305).toString(); // 305s ago
+    const rawBody = JSON.stringify([{ event: 'delivered', email: 'owner@sierra-hvac.com' }]);
+
+    const hmac = crypto.createHmac('sha256', secretKey);
+    hmac.update(`${expiredTimestamp}${rawBody}`);
+    const signature = hmac.digest('base64');
+
+    const isValid = verifySendGridWebhookSignature(rawBody, signature, expiredTimestamp, secretKey);
+    assert.equal(isValid, false);
+  });
+
+  await t.test('verifies HubSpot HMAC-SHA256 signature and rejects tampering', () => {
+    const clientSecret = 'test-hubspot-client-secret-12345';
+    const rawBody = JSON.stringify([{ eventId: 'evt_1', subscriptionType: 'deal.propertyChange' }]);
+
+    const hmac = crypto.createHmac('sha256', clientSecret);
+    hmac.update(rawBody);
+    const validSignature = hmac.digest('hex');
+
+    assert.equal(verifyHubSpotWebhookSignature(rawBody, validSignature, clientSecret), true);
+    assert.equal(verifyHubSpotWebhookSignature(rawBody, 'tampered_hex_sig', clientSecret), false);
+  });
+});
+
+test('Stripe Monetization Engine & Subscription Lifecycle', async (t) => {
+  await t.test('validates 3-tier SaaS pricing and seat quotas', () => {
+    assert.equal(SUBSCRIPTION_PLANS.searcher.priceMonthly, 599);
+    assert.equal(SUBSCRIPTION_PLANS.searcher.seatsIncluded, 1);
+    assert.equal(SUBSCRIPTION_PLANS.searcher.monthlyEnrichedLeads, 500);
+
+    assert.equal(SUBSCRIPTION_PLANS.sponsor.priceMonthly, 2499);
+    assert.equal(SUBSCRIPTION_PLANS.sponsor.seatsIncluded, 5);
+    assert.equal(SUBSCRIPTION_PLANS.sponsor.monthlyEnrichedLeads, 3000);
+
+    assert.equal(SUBSCRIPTION_PLANS.enterprise.priceMonthly, 7500);
+    assert.equal(SUBSCRIPTION_PLANS.enterprise.seatsIncluded, 25);
+    assert.equal(SUBSCRIPTION_PLANS.enterprise.monthlyEnrichedLeads, 15000);
+  });
+
+  await t.test('generates Stripe Checkout Session with deterministic fallback', async () => {
+    const session = await createCheckoutSession({
+      fundId: 'redwood-cap',
+      planId: 'sponsor',
+      billingInterval: 'month',
+      customerEmail: 'partner@redwood-cap.com',
+      successUrl: 'http://localhost:5173/?billing=success',
+      cancelUrl: 'http://localhost:5173/?billing=cancel'
+    });
+
+    assert.ok(session.sessionId.startsWith('cs_live_'));
+    assert.ok(session.checkoutUrl.includes('billing=success'));
+    assert.ok(session.checkoutUrl.includes('plan=sponsor'));
+  });
+
+  await t.test('generates Stripe Customer Portal Session', async () => {
+    const portal = await createCustomerPortalSession({
+      fundId: 'redwood-cap',
+      stripeCustomerId: 'cus_silver_test_123',
+      returnUrl: 'http://localhost:5173/settings'
+    });
+
+    assert.ok(portal.portalUrl.includes('billing_portal=active'));
+  });
+
+  await t.test('verifies Stripe webhook HMAC signature and handles events', () => {
+    const secret = 'whsec_test_secret_12345';
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const payload = JSON.stringify({
+      id: 'evt_stripe_checkout_1',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          customer: 'cus_test_123',
+          subscription: 'sub_test_123',
+          metadata: { fundId: 'redwood-cap', planId: 'sponsor' }
+        }
+      }
+    });
+
+    const hmac = crypto.createHmac('sha256', secret);
+    hmac.update(`${timestamp}.${payload}`);
+    const signature = hmac.digest('hex');
+    const header = `t=${timestamp},v1=${signature}`;
+
+    const isValid = verifyStripeWebhookSignature(payload, header, secret);
+    assert.equal(isValid, true);
+
+    const eventResult = handleStripeWebhookEvent(JSON.parse(payload));
+    assert.equal(eventResult.success, true);
+    assert.ok(eventResult.actionTaken.includes('Activated subscription'));
+  });
+});
+

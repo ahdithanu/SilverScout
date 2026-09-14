@@ -87,8 +87,19 @@ import { ICTeaserModal } from './components/modals/ICTeaserModal';
 import { LogTouchpointModal } from './components/outreach/LogTouchpointModal';
 import { ColdEmailModal } from './components/outreach/ColdEmailModal';
 import { DirectMailLetterModal } from './components/outreach/DirectMailLetterModal';
+import { CadenceStepperCard } from './components/outreach/CadenceStepperCard';
+import { 
+  enrollLeadInCadence, 
+  advanceCadenceStep, 
+  pauseCadence, 
+  resumeCadence, 
+  markCadenceReplied, 
+  getDueCadenceTasks,
+  isCadenceStepDue
+} from './utils/cadenceEngine';
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
+import { BillingSubscriptionModal } from './components/modals/BillingSubscriptionModal';
 import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
 
 import { 
@@ -377,11 +388,13 @@ export default function App() {
   const [icMemoModalLead, setIcMemoModalLead] = useState<Lead | null>(null);
   const [pitchDeckLead, setPitchDeckLead] = useState<Lead | null>(null);
   const [isSyndicationModalOpen, setIsSyndicationModalOpen] = useState(false);
+  const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
   const [icMemoData, setIcMemoData] = useState<ICMemoData | null>(null);
   const [isGeneratingICMemo, setIsGeneratingICMemo] = useState(false);
   const [isLoggingTouchpoint, setIsLoggingTouchpoint] = useState(false);
   const [isColdEmailModalOpen, setIsColdEmailModalOpen] = useState(false);
   const [isDirectMailModalOpen, setIsDirectMailModalOpen] = useState(false);
+  const [cadenceTasksDueOnly, setCadenceTasksDueOnly] = useState(false);
 
   const handleLogTouchpoint = async (touchpointData: Partial<ActivityLog>, shouldAdvanceStage: boolean) => {
     if (!selectedLead) return;
@@ -390,7 +403,7 @@ export default function App() {
     const updatedLogs = [newLog, ...(selectedLead.activityLogs || [])];
 
     const isAdvancing = shouldAdvanceStage && selectedLead.status === 'new';
-    const updatedLead: Lead = {
+    let updatedLead: Lead = {
       ...selectedLead,
       activityLogs: updatedLogs,
       lastContactedAt: touchpointData.timestamp || new Date().toISOString(),
@@ -401,6 +414,11 @@ export default function App() {
       currentState: isAdvancing ? 'OUTREACH_TRIGGERED' : selectedLead.currentState,
       updatedAt: new Date().toISOString()
     };
+
+    // If lead is enrolled in an active cadence, automatically advance cadence step
+    if (selectedLead.cadenceState && selectedLead.cadenceState.status === 'active') {
+      updatedLead = advanceCadenceStep(updatedLead, newLog.id, newLog.notes);
+    }
 
     setSelectedLead(updatedLead);
     setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
@@ -413,12 +431,95 @@ export default function App() {
         nextFollowUpDate: updatedLead.nextFollowUpDate || null,
         lastOutreachChannel: updatedLead.lastOutreachChannel || null,
         lastOutreachOutcome: updatedLead.lastOutreachOutcome || null,
+        cadenceState: updatedLead.cadenceState || null,
         status: updatedLead.status,
         currentState: updatedLead.currentState || null,
         updatedAt: updatedLead.updatedAt
       });
     } catch (err) {
       console.error('Failed to sync outreach touchpoint to Firestore:', err);
+    }
+  };
+
+  const handleEnrollCadence = async (cadenceId: string) => {
+    if (!selectedLead) return;
+    const updated = enrollLeadInCadence(selectedLead, cadenceId);
+    setSelectedLead(updated);
+    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    try {
+      const leadRef = doc(db, 'leads', updated.id);
+      await updateDoc(leadRef, {
+        cadenceState: updated.cadenceState,
+        nextFollowUpDate: updated.nextFollowUpDate || null,
+        lastOutreachChannel: updated.lastOutreachChannel || null,
+        status: updated.status,
+        currentState: updated.currentState || null,
+        updatedAt: updated.updatedAt
+      });
+    } catch (err) {
+      console.error('Failed to sync cadence enrollment:', err);
+    }
+  };
+
+  const handleAdvanceCadence = async () => {
+    if (!selectedLead) return;
+    const updated = advanceCadenceStep(selectedLead);
+    setSelectedLead(updated);
+    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    try {
+      const leadRef = doc(db, 'leads', updated.id);
+      await updateDoc(leadRef, {
+        cadenceState: updated.cadenceState,
+        nextFollowUpDate: updated.nextFollowUpDate || null,
+        updatedAt: updated.updatedAt
+      });
+    } catch (err) {
+      console.error('Failed to sync cadence advancement:', err);
+    }
+  };
+
+  const handlePauseToggleCadence = async () => {
+    if (!selectedLead || !selectedLead.cadenceState) return;
+    const updated = selectedLead.cadenceState.status === 'active'
+      ? pauseCadence(selectedLead)
+      : resumeCadence(selectedLead);
+    setSelectedLead(updated);
+    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    try {
+      const leadRef = doc(db, 'leads', updated.id);
+      await updateDoc(leadRef, {
+        cadenceState: updated.cadenceState,
+        updatedAt: updated.updatedAt
+      });
+    } catch (err) {
+      console.error('Failed to sync cadence pause toggle:', err);
+    }
+  };
+
+  const handleMarkRepliedCadence = async () => {
+    if (!selectedLead) return;
+    const updated = markCadenceReplied(selectedLead);
+    setSelectedLead(updated);
+    setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    try {
+      const leadRef = doc(db, 'leads', updated.id);
+      await updateDoc(leadRef, {
+        cadenceState: updated.cadenceState,
+        status: updated.status,
+        updatedAt: updated.updatedAt
+      });
+    } catch (err) {
+      console.error('Failed to sync cadence reply:', err);
+    }
+  };
+
+  const handleExecuteCadenceStep = (channel: OutreachChannel) => {
+    if (channel === 'email') {
+      setIsColdEmailModalOpen(true);
+    } else if (channel === 'direct_mail') {
+      setIsDirectMailModalOpen(true);
+    } else {
+      setIsLoggingTouchpoint(true);
     }
   };
 
@@ -1172,6 +1273,10 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
     return unsubscribe;
   }, [user]);
 
+  const dueCadenceTasks = useMemo(() => {
+    return getDueCadenceTasks(leads);
+  }, [leads]);
+
   const filteredLeads = useMemo(() => {
     return leads.filter(l => {
       const matchesSearch = 
@@ -1198,9 +1303,11 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         matchesChannel = l.dealSourceChannel === 'INBOUND_INTEREST';
       }
 
-      return matchesSearch && matchesScore && matchesPermitDrop && matchesYear && matchesTags && matchesChannel;
+      const matchesCadenceDue = !cadenceTasksDueOnly || isCadenceStepDue(l);
+
+      return matchesSearch && matchesScore && matchesPermitDrop && matchesYear && matchesTags && matchesChannel && matchesCadenceDue;
     });
-  }, [leads, searchQuery, minScore, maxScore, minPermitDrop, regYear, tagSearch, dashboardChannelFilter]);
+  }, [leads, searchQuery, minScore, maxScore, minPermitDrop, regYear, tagSearch, dashboardChannelFilter, cadenceTasksDueOnly]);
 
   const stats = useMemo(() => {
     const highPropensity = leads.filter(l => l.exitPropensityScore >= 8).length;
@@ -1282,6 +1389,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         setIcMemoModalLead(null);
         setArchiveModalLead(null);
         setShowFinancialParserModal(false);
+        setIsBillingModalOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -2272,7 +2380,20 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
           </button>
         </nav>
         
-        <div className="border-t border-zinc-100 p-4">
+        <div className="border-t border-zinc-100 p-4 space-y-3">
+          <button
+            onClick={() => setIsBillingModalOpen(true)}
+            className="flex w-full items-center justify-between rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-3.5 py-2.5 text-xs font-bold text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition-all"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>Sponsor Tier</span>
+            </div>
+            <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-extrabold uppercase">
+              Manage
+            </span>
+          </button>
+
           <div className="flex items-center gap-3 rounded-lg bg-zinc-50 p-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
               <UserIcon className="h-4 w-4" />
@@ -2327,6 +2448,15 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
             >
               <Download className="h-4 w-4" />
               Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-blue-200 bg-blue-50/60 text-blue-800 hover:bg-blue-100 font-bold"
+              onClick={() => setIsBillingModalOpen(true)}
+            >
+              <CreditCard className="h-4 w-4 text-blue-600" />
+              Plans & Billing
             </Button>
             <a 
               href="/silver_scout_export.zip" 
@@ -2672,6 +2802,19 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                     >
                       <HeartHandshake className="h-3 w-3 text-amber-600" />
                       Inbound ({leads.filter(l => l.dealSourceChannel === 'INBOUND_INTEREST').length})
+                    </button>
+                    <button
+                      onClick={() => setCadenceTasksDueOnly(!cadenceTasksDueOnly)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1",
+                        cadenceTasksDueOnly
+                          ? "bg-indigo-600 text-white shadow-xs"
+                          : "text-indigo-600 hover:text-indigo-800 bg-indigo-50/70"
+                      )}
+                      title="Filter targets that have outreach cadence steps due"
+                    >
+                      <Zap className="h-3 w-3" />
+                      Cadence Due ({dueCadenceTasks.length})
                     </button>
                   </div>
 
@@ -5494,6 +5637,18 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                       )}
                     </div>
 
+                    {/* Multi-Touch Cadence & Outreach Sequence Tracker */}
+                    <div className="mt-8 border-t border-zinc-100 pt-8">
+                      <CadenceStepperCard
+                        lead={selectedLead}
+                        onEnroll={handleEnrollCadence}
+                        onAdvanceStep={handleAdvanceCadence}
+                        onPauseToggle={handlePauseToggleCadence}
+                        onMarkReplied={handleMarkRepliedCadence}
+                        onExecuteStep={handleExecuteCadenceStep}
+                      />
+                    </div>
+
                     {/* AI Outreach Assistant Section */}
                     {selectedLead.aiThesis && (
                       <div className="mt-8 border-t border-zinc-100 pt-8">
@@ -5711,6 +5866,16 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
         isOpen={isInboundPortalOpen}
         onClose={() => setIsInboundPortalOpen(false)}
         onSubmitLead={handleInboundLeadSubmit}
+      />
+
+      {/* Stripe Subscription & Fund Monetization Engine Modal */}
+      <BillingSubscriptionModal
+        show={isBillingModalOpen}
+        onClose={() => setIsBillingModalOpen(false)}
+        currentPlan="sponsor"
+        fundId={profile?.fundId || 'redwood-cap'}
+        fundName="Redwood Mountain Capital"
+        userEmail={profile?.email || 'partner@redwood-cap.com'}
       />
 
       {/* Structured Call & Outreach Touchpoint Logger Modal */}

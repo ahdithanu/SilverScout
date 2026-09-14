@@ -66,6 +66,12 @@ export const LeadKanbanView: React.FC<LeadKanbanViewProps> = ({ leads, onSelectL
                         </span>
                       )}
                     </div>
+                    {lead.cadenceState && lead.cadenceState.status === 'active' && (
+                      <div className="mt-2 flex items-center justify-between rounded bg-indigo-50/90 px-1.5 py-0.5 text-[10px] font-bold text-indigo-900 border border-indigo-100">
+                        <span>⚡ Cadence {lead.cadenceState.currentStepIndex + 1}/{lead.cadenceState.totalSteps}</span>
+                        <span className="capitalize text-[9px] text-indigo-700">{lead.cadenceState.nextStepChannel.replace(/_/g, ' ')}</span>
+                      </div>
+                    )}
                     {lead.nextFollowUpDate && (
                       <div className={`mt-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold border ${
                         new Date(lead.nextFollowUpDate) < new Date()

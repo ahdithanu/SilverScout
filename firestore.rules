@@ -2,10 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
-    // Helper Functions
+    // CISO ZERO-TRUST TENANT ISOLATION & RBAC RULES
     // ===============================================================
+
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid != null;
     }
 
     function isOwner(userId) {
@@ -16,70 +17,95 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isAdmin() {
-      return isAuthenticated() && (
-        getUserData().role == 'admin' ||
-        getUserData().role == 'partner'
-      );
+    function getUserFundId() {
+      return 'fundId' in request.auth.token 
+        ? request.auth.token.fundId 
+        : getUserData().fundId;
     }
 
-    function isSameFund(fundId) {
-      return isAuthenticated() && (
-        !('fundId' in getUserData()) ||
-        getUserData().fundId == fundId ||
-        getUserData().fundId == 'redwood-cap' ||
-        isAdmin()
+    function getUserRole() {
+      return 'role' in request.auth.token 
+        ? request.auth.token.role 
+        : getUserData().role;
+    }
+
+    function isFundMember(fundId) {
+      return isAuthenticated() && getUserFundId() == fundId;
+    }
+
+    function isFundAdmin(fundId) {
+      return isFundMember(fundId) && (
+        getUserRole() == 'admin' || 
+        getUserRole() == 'partner'
       );
     }
 
     // ===============================================================
-    // Rules Configuration
+    // Collection Scopes
     // ===============================================================
 
-    // Users Collection
+    // Users Collection (Strict Tenant Isolation)
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isOwner(userId) || isAdmin();
-      allow delete: if isAdmin();
+      allow read: if isAuthenticated() && (
+        isOwner(userId) || 
+        isFundMember(resource.data.fundId)
+      );
+      allow create: if isAuthenticated() && isOwner(userId);
+      allow update: if isAuthenticated() && (
+        isOwner(userId) || 
+        isFundAdmin(resource.data.fundId)
+      );
+      allow delete: if false; // Deny hard deletes; use soft archiving
     }
 
-    // Legacy Top-Level Leads Collection
+    // Leads Collection (Strict Multi-Tenant Scoping)
     match /leads/{leadId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
-      allow delete: if isAdmin();
+      // Must belong to user's authorized fund
+      allow read: if isAuthenticated() && (
+        resource == null || 
+        isFundMember(resource.data.fundId)
+      );
+      allow create: if isAuthenticated() && 
+        request.resource.data.fundId != null && 
+        isFundMember(request.resource.data.fundId);
+      allow update: if isAuthenticated() && 
+        isFundMember(resource.data.fundId) && 
+        request.resource.data.fundId == resource.data.fundId; // Prevent tenant reparenting
+      allow delete: if isAuthenticated() && 
+        isFundMember(resource.data.fundId) && 
+        isFundAdmin(resource.data.fundId);
     }
 
-    // Multi-Tenant Funds Root Collection
+    // Multi-Tenant Funds Root & Subcollections
     match /funds/{fundId} {
-      allow read: if isSameFund(fundId);
-      allow write: if isAdmin() && isSameFund(fundId);
+      allow read: if isFundMember(fundId);
+      allow write: if isFundAdmin(fundId);
 
-      // Deployment Config Subcollection
+      // Fund Deployment & Underwriting Configurations
       match /config/{configId} {
-        allow read: if isSameFund(fundId);
-        allow write: if isAdmin() && isSameFund(fundId);
+        allow read: if isFundMember(fundId);
+        allow write: if isFundAdmin(fundId);
       }
 
-      // Multi-Tenant Deals Subcollection
+      // Fund Deals Subcollection
       match /deals/{dealId} {
-        allow read: if isSameFund(fundId);
-        allow create, update: if isSameFund(fundId);
-        allow delete: if isAdmin();
+        allow read: if isFundMember(fundId);
+        allow create, update: if isFundMember(fundId);
+        allow delete: if isFundAdmin(fundId);
 
-        // Execution Records Subcollection (Audit & Provenance)
+        // Immutable Cryptographic Audit & Execution Provenance Ledger
         match /executionRecords/{recordId} {
-          allow read: if isSameFund(fundId);
-          allow create: if isSameFund(fundId);
-          allow update, delete: if false; // Immutable audit log
+          allow read: if isFundMember(fundId);
+          allow create: if isFundMember(fundId);
+          allow update, delete: if false; // Strict WORM (Write Once, Read Many)
         }
       }
 
       // Transactional Outbox Subcollection
       match /outbox/{outboxId} {
-        allow read: if isSameFund(fundId);
-        allow create, update: if isSameFund(fundId);
-        allow delete: if isAdmin();
+        allow read: if isFundMember(fundId);
+        allow create, update: if isFundMember(fundId);
+        allow delete: if isFundAdmin(fundId);
       }
     }
 

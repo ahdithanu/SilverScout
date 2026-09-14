@@ -229,10 +229,49 @@ export interface Lead {
   nextFollowUpDate?: string;
   lastOutreachChannel?: OutreachChannel;
   lastOutreachOutcome?: OutreachOutcome;
+  cadenceState?: CadenceState;
 
   createdAt: string;
   updatedAt: string;
   createdBy: string;
+}
+
+export interface CadenceStepConfig {
+  stepNumber: number;
+  delayDays: number;
+  channel: OutreachChannel;
+  title: string;
+  description: string;
+  suggestedTemplateKey?: string;
+}
+
+export interface CadenceDefinition {
+  id: string;
+  name: string;
+  description: string;
+  totalDays: number;
+  steps: CadenceStepConfig[];
+}
+
+export interface CompletedCadenceStep {
+  stepIndex: number;
+  channel: OutreachChannel;
+  completedAt: string;
+  activityLogId?: string;
+  notes?: string;
+}
+
+export interface CadenceState {
+  id: string;
+  name: string;
+  enrolledAt: string;
+  status: 'active' | 'paused' | 'completed' | 'replied';
+  currentStepIndex: number;
+  totalSteps: number;
+  nextStepDueDate: string;
+  nextStepChannel: OutreachChannel;
+  nextStepTitle: string;
+  completedSteps: CompletedCadenceStep[];
 }
 
 export interface UserProfile {
