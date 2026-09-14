@@ -23,6 +23,7 @@ import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
 import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel } from '../services/geminiService';
 import { generateRegistryBatch } from '../services/registryIngestionService';
+import { extractCleanDomain, getTradeFacilityBadge, resolveFacilityImagery } from '../utils/facilityImageResolver';
 import { Lead, ActivityLog, OutreachChannel, OutreachOutcome } from '../types';
 import { 
   CADENCE_PRESETS, 
@@ -1129,4 +1130,97 @@ test('Stripe Monetization Engine & Subscription Lifecycle', async (t) => {
     assert.ok(eventResult.actionTaken.includes('Activated subscription'));
   });
 });
+
+test('Authentic Facility Imagery & Anti-Stock Resolution Engine', async (t) => {
+  await t.test('extracts clean root domain from various URL formats', () => {
+    assert.equal(extractCleanDomain('https://www.sierra-hvac.com/about-us'), 'sierra-hvac.com');
+    assert.equal(extractCleanDomain('http://plumbingpros.com/services?zip=95814'), 'plumbingpros.com');
+    assert.equal(extractCleanDomain('www.apexroofingca.com'), 'apexroofingca.com');
+    assert.equal(extractCleanDomain('valleyelectric.com/contact'), 'valleyelectric.com');
+    assert.equal(extractCleanDomain(undefined), undefined);
+  });
+
+  await t.test('returns verified NAICS trade facility badges and features', () => {
+    const hvacBadge = getTradeFacilityBadge('Commercial HVAC');
+    assert.ok(hvacBadge.naicsCode.includes('238220'));
+    assert.ok(hvacBadge.facilityType.includes('Fabrication'));
+    assert.ok(hvacBadge.keyFeatures.some(f => f.includes('Refrigerant')));
+
+    const plumbBadge = getTradeFacilityBadge('Plumbing & Pipefitting');
+    assert.ok(plumbBadge.naicsCode.includes('238220'));
+    assert.ok(plumbBadge.facilityType.includes('Pipe Yard'));
+
+    const electrBadge = getTradeFacilityBadge('Electrical Contractors');
+    assert.ok(electrBadge.naicsCode.includes('238210'));
+
+    const roofBadge = getTradeFacilityBadge('Commercial Roofing');
+    assert.ok(roofBadge.naicsCode.includes('238160'));
+  });
+
+  await t.test('resolves grounded Street View Pano deep-links and brand favicons', () => {
+    const testLead: Lead = {
+      id: 'lead-sierra-01',
+      fundId: 'redwood-cap',
+      name: 'Sierra Valley HVAC',
+      industry: 'Commercial HVAC',
+      location: 'Sacramento, CA',
+      registrationDate: '2004-03-12',
+      agentName: 'John Sierra',
+      isCorporateAgent: false,
+      permitVolume2023_2025: 180,
+      permitVolume2026: 45,
+      permitDrop: 45,
+      lastDigitalPostDate: '2023-11-15',
+      reviewVelocity: 0.2,
+      exitPropensityScore: 8.8,
+      aiThesis: 'High propensity HVAC target',
+      valuationEstimate: 2800000,
+      status: 'new',
+      website: 'https://www.sierravalleyhvac.com',
+      address: '4010 Power Inn Rd, Sacramento, CA'
+    };
+
+    const imagery = resolveFacilityImagery(testLead);
+
+    assert.equal(imagery.domain, 'sierravalleyhvac.com');
+    assert.equal(imagery.brandFaviconUrl, 'https://www.google.com/s2/favicons?domain=sierravalleyhvac.com&sz=128');
+    assert.ok(imagery.streetViewPanoUrl.includes('map_action=pano'));
+    assert.ok(imagery.googleMapsPlaceUrl.includes('Power%20Inn%20Rd'));
+    assert.equal(imagery.isGroundedInCoordinates, true);
+    assert.ok(imagery.facilityBadge.keyFeatures.length >= 3);
+  });
+
+  await t.test('gracefully falls back when lead has no website or custom photo', () => {
+    const blindLead: Lead = {
+      id: 'lead-blind-02',
+      fundId: 'redwood-cap',
+      name: 'Northern California Electrical Supply',
+      industry: 'Electrical',
+      location: 'Redding, CA',
+      registrationDate: '2010-06-01',
+      agentName: 'Robert Vance',
+      isCorporateAgent: true,
+      permitVolume2023_2025: 90,
+      permitVolume2026: 20,
+      permitDrop: 55,
+      lastDigitalPostDate: '2022-04-10',
+      reviewVelocity: 0.1,
+      exitPropensityScore: 9.1,
+      aiThesis: 'Severe permit drop and digital ghost',
+      valuationEstimate: 3400000,
+      status: 'new'
+    };
+
+    const imagery = resolveFacilityImagery(blindLead);
+
+    assert.equal(imagery.domain, undefined);
+    assert.equal(imagery.brandFaviconUrl, undefined);
+    assert.equal(imagery.hasCustomPhoto, false);
+    // Verified coordinate grounding remains intact via city centroid with deterministic pin dispersion
+    assert.equal(imagery.isGroundedInCoordinates, true);
+    assert.ok(Math.abs(imagery.coordinates.lat - 40.5865) < 0.1);
+    assert.ok(imagery.facilityBadge.naicsCode.includes('238210'));
+  });
+});
+
 

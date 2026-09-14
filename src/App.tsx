@@ -100,6 +100,7 @@ import {
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
 import { BillingSubscriptionModal } from './components/modals/BillingSubscriptionModal';
+import { FacilityImage } from './components/common/FacilityImage';
 import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
 
 import { 
@@ -4907,6 +4908,9 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
                       {enrichmentNotice}
                     </div>
                   )}
+
+                  {/* Physical Facility Sourcing & Verified Visual Dossier */}
+                  <FacilityImage lead={selectedLead} className="mt-4" />
 
                   {/* Quick Action Contact Bar */}
                   <div className="mt-4 flex flex-wrap gap-2">

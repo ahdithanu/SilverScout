@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Building2, MapPin, BarChart3, Calendar, Phone, Users, Star, Globe } from 'lucide-react';
 import { Lead } from '../../types';
 import { Card, Badge, formatStatusLabel } from '../../App';
+import { extractCleanDomain } from '../../utils/facilityImageResolver';
 
 interface LeadListViewProps {
   leads: Lead[];
@@ -11,7 +12,9 @@ interface LeadListViewProps {
 export const LeadListView: React.FC<LeadListViewProps> = ({ leads, onSelectLead }) => {
   return (
     <div className="grid gap-4">
-      {leads.map((lead) => (
+      {leads.map((lead) => {
+        const domain = extractCleanDomain(lead.website || lead.businessProfile?.website);
+        return (
         <Card
           key={lead.id}
           onClick={() => onSelectLead(lead)}
@@ -21,8 +24,24 @@ export const LeadListView: React.FC<LeadListViewProps> = ({ leads, onSelectLead 
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 text-zinc-500 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors">
-                <Building2 className="h-6 w-6" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 text-zinc-500 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors overflow-hidden border border-zinc-200/60 p-1">
+                {domain ? (
+                  <img
+                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+                    alt={`${lead.name} logo`}
+                    className="h-7 w-7 object-contain rounded"
+                    onError={(e) => {
+                      // Fall back to building icon if domain favicon fails
+                      (e.currentTarget as HTMLElement).style.display = 'none';
+                      const parent = (e.currentTarget as HTMLElement).parentElement;
+                      if (parent) {
+                        const fallbackIcon = parent.querySelector('.lead-fallback-icon') as HTMLElement;
+                        if (fallbackIcon) fallbackIcon.style.display = 'block';
+                      }
+                    }}
+                  />
+                ) : null}
+                <Building2 className={`h-6 w-6 lead-fallback-icon ${domain ? 'hidden' : 'block'}`} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -107,7 +126,8 @@ export const LeadListView: React.FC<LeadListViewProps> = ({ leads, onSelectLead 
             </div>
           </div>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 };
