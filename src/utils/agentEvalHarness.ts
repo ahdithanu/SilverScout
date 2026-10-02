@@ -7,7 +7,6 @@
  * 3. God Mode: Self-Improving Loop (Production trace receipts -> failure clustering -> automated eval generation & prompt patches)
  */
 
-import crypto from 'crypto';
 
 // ==========================================
 // 1. EASY MODE: TASKS & VERIFIERS
@@ -232,7 +231,10 @@ export class SandboxedAgentEnvironment {
   private auditLog: string[];
 
   constructor(initialData: MockDatabaseRecord[] = []) {
-    this.sandboxId = `sandbox-${crypto.randomUUID().slice(0, 8)}`;
+    const rawUuid = typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID 
+      ? globalThis.crypto.randomUUID() 
+      : Math.random().toString(36).substring(2, 10);
+    this.sandboxId = `sandbox-${rawUuid.slice(0, 8)}`;
     this.virtualDatabase = new Map();
     this.outboundNetworkCalls = [];
     this.auditLog = [];

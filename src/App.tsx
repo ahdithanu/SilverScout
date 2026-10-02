@@ -60,7 +60,9 @@ import {
   Award,
   Navigation,
   Truck,
-  PhoneCall
+  PhoneCall,
+  CreditCard,
+  Cpu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -100,8 +102,10 @@ import {
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
 import { BillingSubscriptionModal } from './components/modals/BillingSubscriptionModal';
+import { SubscriptionTier, SUBSCRIPTION_PLANS } from './utils/billing';
 import { FacilityImage } from './components/common/FacilityImage';
 import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
+import { AgentEvalRunnerLab } from './components/intelligence/AgentEvalRunnerLab';
 
 import { 
   auth, 
@@ -306,7 +310,7 @@ export default function App() {
     }
   };
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'ingestion' | 'intelligence' | 'ontology' | 'graph-rag' | 'territory' | 'analytics' | 'outreach' | 'operator' | 'settings'
+    'dashboard' | 'ingestion' | 'intelligence' | 'ontology' | 'graph-rag' | 'territory' | 'analytics' | 'outreach' | 'operator' | 'settings' | 'eval-lab'
   >('dashboard');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -390,6 +394,7 @@ export default function App() {
   const [pitchDeckLead, setPitchDeckLead] = useState<Lead | null>(null);
   const [isSyndicationModalOpen, setIsSyndicationModalOpen] = useState(false);
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
+  const [currentPlan, setCurrentPlan] = useState<SubscriptionTier>('sponsor');
   const [icMemoData, setIcMemoData] = useState<ICMemoData | null>(null);
   const [isGeneratingICMemo, setIsGeneratingICMemo] = useState(false);
   const [isLoggingTouchpoint, setIsLoggingTouchpoint] = useState(false);
@@ -2370,6 +2375,16 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
             Operator Control Plane
           </button>
           <button 
+            onClick={() => setActiveTab('eval-lab')}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              activeTab === 'eval-lab' ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-zinc-600 hover:bg-zinc-50"
+            )}
+          >
+            <Cpu className="h-4 w-4 text-emerald-600" />
+            Agent Eval Lab
+          </button>
+          <button 
             onClick={() => setActiveTab('settings')}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -2388,7 +2403,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
           >
             <div className="flex items-center gap-2">
               <Sparkles className="h-3.5 w-3.5" />
-              <span>Sponsor Tier</span>
+              <span>{SUBSCRIPTION_PLANS[currentPlan]?.name.split(' ')[0] || 'Sponsor'} Tier</span>
             </div>
             <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-extrabold uppercase">
               Manage
@@ -4768,6 +4783,12 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
               </Card>
             </div>
           )}
+
+          {activeTab === 'eval-lab' && (
+            <div className="p-8">
+              <AgentEvalRunnerLab />
+            </div>
+          )}
         </div>
       </main>
 
@@ -5876,10 +5897,11 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
       <BillingSubscriptionModal
         show={isBillingModalOpen}
         onClose={() => setIsBillingModalOpen(false)}
-        currentPlan="sponsor"
+        currentPlan={currentPlan}
         fundId={profile?.fundId || 'redwood-cap'}
         fundName="Redwood Mountain Capital"
         userEmail={profile?.email || 'partner@redwood-cap.com'}
+        onPlanChanged={(newTier) => setCurrentPlan(newTier)}
       />
 
       {/* Structured Call & Outreach Touchpoint Logger Modal */}
