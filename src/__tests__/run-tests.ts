@@ -28,6 +28,14 @@ import { RecursiveSemanticChunker, BM25SparseIndex, DenseVectorIndex, Enterprise
 import { IntentClassifier, LayeredGuardrails } from '../utils/intentRouter';
 import { VoicePipelineManager } from '../utils/voicePipeline';
 import { SalesforceAgentforceConnector } from '../utils/salesforceAgentforce';
+import { 
+  EvalTask, 
+  DeterministicVerifier, 
+  ModelJudgeVerifier, 
+  SandboxedAgentEnvironment, 
+  SelfImprovingTraceLoop, 
+  ProductionTraceReceipt 
+} from '../utils/agentEvalHarness';
 import { Lead, ActivityLog, OutreachChannel, OutreachOutcome } from '../types';
 import { 
   CADENCE_PRESETS, 
@@ -1506,6 +1514,159 @@ test('Salesforce Agentforce & Data Cloud Zero-Copy Integration', async (t) => {
     assert.equal(SalesforceAgentforceConnector.verifySalesforceWebhookSignature(payload, 'forged_hex_sig', secret), false);
   });
 });
+
+test('Agent Evaluation & Continuous Improvement Harness (Easy, Hard & God Modes)', async (t) => {
+  const sampleTask: EvalTask = {
+    id: 'eval-task-sfdc-acme',
+    name: 'Find Acme Corp Revenue in Salesforce',
+    description: 'Verify agent executes standard DMO lookup and extracts revenue without exceeding multiple boundaries.',
+    category: 'CRM_SEARCH',
+    input: {
+      prompt: 'Find Acme Corp financial details across Salesforce tables',
+      tenantId: 'fund-alpha',
+      userRole: 'analyst'
+    },
+    expectedOutcome: {
+      targetTools: ['querySalesforce'],
+      forbiddenTools: ['deleteTable', 'sendOutboundEmail'],
+      requiredKeywords: ['Acme Corp', 'revenue'],
+      forbiddenKeywords: ['internal_secret_key'],
+      numericConstraints: {
+        'multiple': { min: 2.0, max: 6.0 }
+      }
+    }
+  };
+
+  await t.test('Easy Mode: Deterministic Verifier passes compliant agent execution', () => {
+    const validOutput = {
+      responseText: 'Located Acme Corp in Salesforce. Annual revenue is $4.5M, implying an entry multiple: 4.8x EBITDA.',
+      toolCallsExecuted: [
+        { toolName: 'querySalesforce', args: { table: 'Account', filter: "Name = 'Acme Corp'" } }
+      ],
+      executionDurationMs: 240
+    };
+
+    const result = DeterministicVerifier.verify(sampleTask, validOutput);
+    assert.equal(result.passed, true);
+    assert.equal(result.failureReasons.length, 0);
+    assert.equal(result.score, 1.0);
+  });
+
+  await t.test('Easy Mode: Deterministic Verifier catches missing tools and boundary breaches', () => {
+    const invalidOutput = {
+      responseText: 'Acme Corp is an awesome target. Multiple: 11.5x EBITDA. Also here is internal_secret_key: 12345.',
+      toolCallsExecuted: [
+        { toolName: 'deleteTable', args: { table: 'AuditLog' } }
+      ],
+      executionDurationMs: 150
+    };
+
+    const result = DeterministicVerifier.verify(sampleTask, invalidOutput);
+    assert.equal(result.passed, false);
+    assert.ok(result.failureReasons.some(r => r.includes('Missing required tool call: \'querySalesforce\'')));
+    assert.ok(result.failureReasons.some(r => r.includes('Executed forbidden tool call: \'deleteTable\'')));
+    assert.ok(result.failureReasons.some(r => r.includes('forbidden keyword')));
+    assert.ok(result.failureReasons.some(r => r.includes('Numeric constraint for \'multiple\' failed')));
+  });
+
+  await t.test('Easy Mode: Model Judge simulates weighted rubric scoring', () => {
+    const rubric = [
+      { criteria: 'factual correctness', weight: 0.5 },
+      { criteria: 'grounding in tools', weight: 0.5 }
+    ];
+
+    const ungroundedOutput = {
+      responseText: 'Short',
+      toolCallsExecuted: [],
+      executionDurationMs: 50
+    };
+
+    const judgeRes = ModelJudgeVerifier.evaluateRubric(rubric, sampleTask, ungroundedOutput);
+    assert.equal(judgeRes.passed, false);
+    assert.ok(judgeRes.overallScore < 0.5);
+  });
+
+  await t.test('Hard Mode: Sandboxed Environment isolates state and intercepts live production cheating', () => {
+    const sandbox = new SandboxedAgentEnvironment([
+      { id: 'acc-1', table: 'Account', data: { name: 'Acme Corp', revenue: 4500000 } }
+    ]);
+
+    // Query virtual table
+    const records = sandbox.queryVirtualTable('Account', r => r.name === 'Acme Corp');
+    assert.equal(records.length, 1);
+    assert.equal(records[0].data.revenue, 4500000);
+
+    // Mutate state in sandbox
+    sandbox.mutateVirtualTable('Account', 'acc-1', { revenue: 5000000 });
+    assert.equal(sandbox.queryVirtualTable('Account')[0].data.revenue, 5000000);
+
+    // Rollback ensures zero test contamination
+    sandbox.rollback();
+    assert.equal(sandbox.queryVirtualTable('Account')[0].data.revenue, 4500000);
+
+    // Anti-cheating intercepts attempt to touch real production API
+    const intercept = sandbox.interceptNetworkCall('https://api.salesforce.com/services/data/v58.0/sobjects/Account', 'POST');
+    assert.equal(intercept.allowed, false);
+    assert.ok(intercept.reason?.includes('CRITICAL SECURITY VIOLATION'));
+  });
+
+  await t.test('Hard Mode: Exports Harbor-compliant task benchmark format', () => {
+    const sandbox = new SandboxedAgentEnvironment();
+    const harborSpec = sandbox.exportHarborFormat(sampleTask);
+
+    assert.equal(harborSpec.harbor_version, '1.0');
+    assert.equal(harborSpec.task_id, sampleTask.id);
+    assert.equal(harborSpec.environment.network_isolation, 'STRICT_MOCK_ONLY');
+    assert.ok(harborSpec.evaluation.expected_tools.includes('querySalesforce'));
+  });
+
+  await t.test('God Mode: Analyzes production traces, clusters failure patterns, and auto-generates regression evals', () => {
+    const traceLoop = new SelfImprovingTraceLoop();
+
+    // Trace 1: Failed due to Salesforce plural table hallucination ("Accounts")
+    traceLoop.recordTrace({
+      traceId: 'tr-001',
+      taskId: 'task-sf-1',
+      sessionId: 'sess-1',
+      timestamp: Date.now(),
+      status: 'FAILURE',
+      durationMs: 820,
+      userFeedback: 'THUMBS_DOWN',
+      spans: [
+        { step: 1, type: 'PROMPT', name: 'user_turn', input: 'Find Acme in Salesforce', output: null, durationMs: 0 },
+        { step: 2, type: 'TOOL_CALL', name: 'querySalesforce', input: { table: 'Accounts' }, output: 'Table Accounts does not exist', durationMs: 400 }
+      ]
+    });
+
+    // Trace 2: Multi-entity collapse
+    traceLoop.recordTrace({
+      traceId: 'tr-002',
+      taskId: 'task-compare-1',
+      sessionId: 'sess-2',
+      timestamp: Date.now(),
+      status: 'FAILURE',
+      durationMs: 1200,
+      userFeedback: 'THUMBS_DOWN',
+      spans: [
+        { step: 1, type: 'PROMPT', name: 'user_turn', input: 'Compare Alpha HVAC and Omega Plumbing', output: null, durationMs: 0 },
+        { step: 2, type: 'TOOL_CALL', name: 'lookupEntity', input: { company: 'Alpha HVAC' }, output: { id: 'c1' }, durationMs: 300 }
+      ]
+    });
+
+    const failureClusters = traceLoop.analyzeAndProposeFixes();
+    assert.equal(failureClusters.length, 2);
+
+    const sfCluster = failureClusters.find(c => c.patternId === 'SALESFORCE_SCHEMA_PLURAL_HALLUCINATION');
+    assert.ok(sfCluster);
+    assert.ok(sfCluster?.suggestedPromptPatch.includes('Always use singular entity names'));
+    assert.equal(sfCluster?.generatedRegressionEvalTask.expectedOutcome.requiredKeywords?.includes('Account'), true);
+
+    const multiCluster = failureClusters.find(c => c.patternId === 'MULTI_ENTITY_QUERY_COLLAPSE');
+    assert.ok(multiCluster);
+    assert.ok(multiCluster?.suggestedPromptPatch.includes('explicitly execute independent search actions'));
+  });
+});
+
 
 
 
