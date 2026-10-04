@@ -36,6 +36,7 @@ import {
   SelfImprovingTraceLoop, 
   ProductionTraceReceipt 
 } from '../utils/agentEvalHarness';
+import { ContinuousIngestionScheduler } from '../utils/continuousIngestionScheduler';
 import { Lead, ActivityLog, OutreachChannel, OutreachOutcome } from '../types';
 import { 
   CADENCE_PRESETS, 
@@ -1666,6 +1667,175 @@ test('Agent Evaluation & Continuous Improvement Harness (Easy, Hard & God Modes)
     assert.ok(multiCluster?.suggestedPromptPatch.includes('explicitly execute independent search actions'));
   });
 });
+
+test('Continuous Listing Ingestion & Multi-Daily Feed Scheduler', async (t) => {
+  const scheduler = new ContinuousIngestionScheduler();
+
+  await t.test('initializes multi-source feeds with staggered multi-daily poll intervals', () => {
+    const feeds = scheduler.getFeeds();
+    assert.ok(feeds.length >= 4);
+
+    const crexi = feeds.find(f => f.platform === 'Crexi');
+    assert.ok(crexi);
+    assert.equal(crexi?.pollIntervalHours, 4);
+    assert.equal(crexi?.frequency, 'EVERY_4_HOURS');
+
+    const axial = feeds.find(f => f.platform === 'Axial');
+    assert.ok(axial);
+    assert.equal(axial?.pollIntervalHours, 1);
+    assert.equal(axial?.frequency, 'HOURLY');
+  });
+
+  await t.test('generates deterministic SHA-256 fingerprints to prevent duplicate creation', () => {
+    const fp1 = ContinuousIngestionScheduler.computeFingerprint({
+      name: 'Central Valley HVAC',
+      location: 'Stockton, CA',
+      sourcePlatform: 'BizBuySell',
+      listingId: 'BBS-9912'
+    });
+
+    const fp2 = ContinuousIngestionScheduler.computeFingerprint({
+      name: '  central valley hvac  ',
+      location: 'Stockton, CA',
+      sourcePlatform: 'BizBuySell',
+      listingId: 'BBS-9912'
+    });
+
+    assert.equal(fp1, fp2);
+    assert.ok(fp1.startsWith('fp-'));
+  });
+
+  await t.test('detects price drop deltas and days-on-market seller fatigue without creating duplicates', () => {
+    const existingLead: Lead = {
+      id: 'lead-cre-101',
+      fundId: 'redwood-cap',
+      name: 'Sacramento Commercial Plaza',
+      industry: 'Property Management',
+      location: 'Sacramento, CA',
+      registrationDate: '2015-01-01',
+      agentName: 'Broker',
+      isCorporateAgent: true,
+      permitVolume2023_2025: 10,
+      permitVolume2026: 10,
+      permitDrop: 0,
+      lastDigitalPostDate: 'Active',
+      reviewVelocity: 0.5,
+      exitPropensityScore: 6.5,
+      aiThesis: 'Thesis',
+      valuationEstimate: 4500000,
+      status: 'qualified',
+      revenue: 4500000,
+      ebitda: 900000,
+      profitMargin: 20,
+      dealSourceChannel: 'ON_MARKET_LISTING',
+      listingDetails: {
+        sourcePlatform: 'Crexi',
+        listingId: 'CRX-9901',
+        askingPrice: 4500000,
+        cashFlowOrSde: 900000,
+        daysOnMarket: 90
+      },
+      createdAt: new Date().toISOString()
+    };
+
+    // Incoming sweep 4 hours later with $500k price cut and 125 DOM
+    const incomingUpdate: Partial<Lead> = {
+      name: 'Sacramento Commercial Plaza',
+      location: 'Sacramento, CA',
+      listingDetails: {
+        sourcePlatform: 'Crexi',
+        listingId: 'CRX-9901',
+        askingPrice: 4000000, // $500k drop
+        cashFlowOrSde: 900000,
+        daysOnMarket: 125 // crossed 120 threshold
+      }
+    };
+
+    const delta = ContinuousIngestionScheduler.detectDelta(existingLead, incomingUpdate);
+    assert.ok(delta);
+    assert.equal(delta?.changeType, 'PRICE_DROP');
+    assert.equal(delta?.previousAskingPrice, 4500000);
+    assert.equal(delta?.newAskingPrice, 4000000);
+    assert.equal(delta?.priceDropPct, 11.1);
+  });
+
+  await t.test('executes feed sweep, creates new leads, and suppresses duplicates', () => {
+    const existing: Lead[] = [
+      {
+        id: 'lead-existing-1',
+        fundId: 'redwood-cap',
+        name: 'Modesto Mechanical Services',
+        industry: 'Plumbing',
+        location: 'Modesto, CA',
+        registrationDate: '2010-01-01',
+        agentName: 'Broker',
+        isCorporateAgent: true,
+        permitVolume2023_2025: 10,
+        permitVolume2026: 10,
+        permitDrop: 0,
+        lastDigitalPostDate: 'Active',
+        reviewVelocity: 0.5,
+        exitPropensityScore: 7.0,
+        aiThesis: 'Thesis',
+        valuationEstimate: 3200000,
+        status: 'qualified',
+        revenue: 3200000,
+        ebitda: 710000,
+        profitMargin: 22,
+        dealSourceChannel: 'ON_MARKET_LISTING',
+        listingDetails: {
+          sourcePlatform: 'BizBuySell',
+          listingId: 'BBS-771',
+          askingPrice: 3200000,
+          cashFlowOrSde: 710000,
+          daysOnMarket: 45
+        },
+        createdAt: new Date().toISOString()
+      }
+    ];
+
+    const incomingBatch: Partial<Lead>[] = [
+      // 1. Exact duplicate of existing
+      {
+        name: 'Modesto Mechanical Services',
+        location: 'Modesto, CA',
+        listingDetails: {
+          sourcePlatform: 'BizBuySell',
+          listingId: 'BBS-771',
+          askingPrice: 3200000,
+          cashFlowOrSde: 710000,
+          daysOnMarket: 45
+        }
+      },
+      // 2. Brand new property
+      {
+        name: 'Roseville Multifamily 24-Unit Complex',
+        industry: 'Multifamily Real Estate',
+        location: 'Roseville, CA',
+        revenue: 950000,
+        ebitda: 550000,
+        valuationEstimate: 6200000,
+        listingDetails: {
+          sourcePlatform: 'Crexi',
+          listingId: 'CRX-ROSE-24',
+          askingPrice: 5900000,
+          cashFlowOrSde: 550000,
+          daysOnMarket: 30,
+          unitsCount: 24,
+          capRatePct: 6.8
+        }
+      }
+    ];
+
+    const result = scheduler.executeSweep(existing, incomingBatch);
+    assert.equal(result.totalListingsFetched, 2);
+    assert.equal(result.newListingsCreated.length, 1);
+    assert.equal(result.duplicatesSuppressed, 1);
+    assert.equal(result.newListingsCreated[0].name, 'Roseville Multifamily 24-Unit Complex');
+    assert.ok(result.nextScheduledRun);
+  });
+});
+
 
 
 

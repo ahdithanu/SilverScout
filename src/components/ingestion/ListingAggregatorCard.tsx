@@ -5,6 +5,7 @@ import {
   computeListingSignals, 
   deAnonymizeBlindListing 
 } from '../../services/listingIngestionService';
+import { ContinuousIngestionScheduler, IngestionDelta } from '../../utils/continuousIngestionScheduler';
 import { 
   Store, 
   TrendingDown, 
@@ -16,7 +17,11 @@ import {
   Layers, 
   ArrowRight,
   ShieldCheck,
-  DollarSign
+  DollarSign,
+  RefreshCw,
+  Sparkles,
+  Zap,
+  Activity
 } from 'lucide-react';
 
 interface ListingAggregatorCardProps {
@@ -34,6 +39,21 @@ export const ListingAggregatorCard: React.FC<ListingAggregatorCardProps> = ({
   );
   const [isIngesting, setIsIngesting] = useState(false);
   const [successCount, setSuccessCount] = useState<number | null>(null);
+  const [scheduler] = useState<ContinuousIngestionScheduler>(() => new ContinuousIngestionScheduler());
+  const [lastSweepResult, setLastSweepResult] = useState<any | null>(null);
+  const [isSweepingFeeds, setIsSweepingFeeds] = useState(false);
+
+  const handleTriggerMultiDailySweep = () => {
+    setIsSweepingFeeds(true);
+    setTimeout(() => {
+      const result = scheduler.executeSweep(existingLeads, SAMPLE_MARKETPLACE_LISTINGS);
+      setLastSweepResult(result);
+      if (result.newListingsCreated.length > 0) {
+        onIngestListings(result.newListingsCreated);
+      }
+      setIsSweepingFeeds(false);
+    }, 500);
+  };
 
   const filteredListings = SAMPLE_MARKETPLACE_LISTINGS.filter(item => {
     if (activeCategory === 'all') return true;
@@ -145,6 +165,78 @@ export const ListingAggregatorCard: React.FC<ListingAggregatorCardProps> = ({
           <Layers className="h-4 w-4" />
           {isIngesting ? 'Ingesting Feeds...' : `Ingest ${selectedIds.length} Selected Deals`}
         </button>
+      </div>
+
+      {/* Multi-Daily Continuous Ingestion Status Banner */}
+      <div className="rounded-xl border border-purple-200 bg-gradient-to-r from-purple-50/80 via-white to-indigo-50/80 p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-600 text-white shadow-xs">
+              <Activity className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-zinc-900">Multi-Daily Continuous Ingestion Engine</span>
+                <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                  Active Polling (4x Daily)
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-500">
+                Continuous sweeps on Crexi (every 4h), BizBuySell (every 4h), LoopNet (2x daily) & Axial (hourly) with Change Data Capture (CDC).
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleTriggerMultiDailySweep}
+            disabled={isSweepingFeeds}
+            className="flex items-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-purple-700 transition-colors disabled:opacity-50 whitespace-nowrap self-start sm:self-auto cursor-pointer"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isSweepingFeeds ? 'animate-spin' : ''}`} />
+            {isSweepingFeeds ? 'Sweeping Multi-Daily Feeds...' : 'Run Scheduled Sweep Now'}
+          </button>
+        </div>
+
+        {/* Feed Source Badges */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-purple-100/60">
+          {scheduler.getFeeds().map(feed => (
+            <div key={feed.id} className="rounded-lg bg-white/80 border border-purple-100 p-2 text-[11px]">
+              <div className="flex items-center justify-between font-bold text-zinc-800">
+                <span>{feed.platform}</span>
+                <span className="text-[9px] uppercase tracking-wider text-purple-700 font-extrabold bg-purple-50 px-1.5 py-0.5 rounded">
+                  {feed.frequency.replace('_', ' ')}
+                </span>
+              </div>
+              <div className="text-[10px] text-zinc-400 mt-0.5 flex items-center justify-between">
+                <span>Interval: {feed.pollIntervalHours}h</span>
+                <span className="text-emerald-600 font-semibold">~{feed.averageNewPerSweep} listings/sweep</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Last Sweep Delta Report (if ran) */}
+        {lastSweepResult && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-xs space-y-1">
+            <div className="flex items-center justify-between font-bold text-emerald-900">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                Sweep Completed: {lastSweepResult.newListingsCreated.length} New Properties Ingested, {lastSweepResult.duplicatesSuppressed} Duplicates Suppressed
+              </span>
+              <span className="text-[10px] text-emerald-700 font-mono">Next automated sweep: in 4 hours</span>
+            </div>
+            {lastSweepResult.deltasDetected.length > 0 && (
+              <div className="pt-1">
+                {lastSweepResult.deltasDetected.map((d: IngestionDelta, i: number) => (
+                  <p key={i} className="text-[11px] text-emerald-800">
+                    ⚡ <strong>Change Detected:</strong> {d.narrative}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Category Filter Pills */}
