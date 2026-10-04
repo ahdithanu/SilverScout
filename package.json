@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "test": "tsx --test src/__tests__/run-tests.ts src/__tests__/e2e-verification.ts src/__tests__/graph-rag.test.ts src/__tests__/listing-inbound.test.ts src/__tests__/telemetry-sweeper.test.ts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

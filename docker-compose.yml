@@ -1,18 +1,31 @@
 version: '3.8'
 
 services:
-  api:
-    build: .
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: silverscout:latest
+    container_name: silver-scout-platform
+    restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
+      - NODE_ENV=production
       - PORT=3001
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    depends_on:
-      - redis
+      - DATA_DIR=/app/data
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      # Persistent storage volume for leads, listings, audit ledger, and exports
+      - silver_scout_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+volumes:
+  # Named volume for persistent data storage across container restarts and updates
+  silver_scout_data:
+    name: silver_scout_data

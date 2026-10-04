@@ -18,6 +18,7 @@ import { validateLLMOutputAgainstFinancialFacts } from '../../server/financialGu
 import { AuditProvenanceLedger } from '../../server/auditLedger';
 import { processSendGridWebhookEvent, processHubSpotWebhookEvent, verifySendGridWebhookSignature, verifyHubSpotWebhookSignature } from '../../server/webhooks';
 import { applySecurityHeaders, authenticateTenant } from '../../server/auth';
+import { PersistentStorage } from '../../server/persistentStorage';
 import { createCheckoutSession, createCustomerPortalSession, verifyStripeWebhookSignature, handleStripeWebhookEvent } from '../../server/billing';
 import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
@@ -1835,6 +1836,46 @@ test('Continuous Listing Ingestion & Multi-Daily Feed Scheduler', async (t) => {
     assert.ok(result.nextScheduledRun);
   });
 });
+
+test('Docker Persistent Volume Storage Engine', async (t) => {
+  await t.test('saves and loads collection data with zero loss', () => {
+    const testItems = [
+      { id: 'dock-lead-1', name: 'Lake Tahoe HVAC', revenue: 4200000 },
+      { id: 'dock-lead-2', name: 'Reno Commercial Plumbing', revenue: 5600000 }
+    ];
+
+    PersistentStorage.saveCollection('test_leads', testItems);
+    const loaded = PersistentStorage.loadCollection<typeof testItems[0]>('test_leads');
+
+    assert.equal(loaded.length, 2);
+    assert.equal(loaded[0].name, 'Lake Tahoe HVAC');
+    assert.equal(loaded[1].revenue, 5600000);
+  });
+
+  await t.test('saves and loads single configuration objects safely', () => {
+    const config = {
+      fundId: 'redwood-cap',
+      minMultiple: 3.5,
+      maxMultiple: 6.0,
+      enabledFeeds: ['Crexi', 'LoopNet', 'BizBuySell']
+    };
+
+    PersistentStorage.saveObject('fund_deployment_test', config);
+    const loaded = PersistentStorage.loadObject('fund_deployment_test', { fundId: 'default' });
+
+    assert.equal(loaded.fundId, 'redwood-cap');
+    assert.equal((loaded as any).minMultiple, 3.5);
+  });
+
+  await t.test('reports storage directory metrics and file size totals', () => {
+    const metrics = PersistentStorage.getStorageMetrics();
+    assert.ok(metrics.directory);
+    assert.ok(Array.isArray(metrics.files));
+    assert.ok(metrics.files.some(f => f.name.includes('test_leads.json')));
+    assert.ok(metrics.totalSizeBytes > 0);
+  });
+});
+
 
 
 

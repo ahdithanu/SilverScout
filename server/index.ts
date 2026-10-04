@@ -24,8 +24,11 @@ import {
   verifyStripeWebhookSignature,
   handleStripeWebhookEvent
 } from './billing';
+import path from 'path';
+import fs from 'fs';
 import { DealDocument, DealStage, FundDeploymentConfig } from '../src/types';
 import { DEFAULT_FUND_DEPLOYMENT_CONFIG } from '../src/utils/branding';
+import { PersistentStorage } from './persistentStorage';
 
 dotenv.config();
 
@@ -464,6 +467,21 @@ app.post(
     });
   }
 );
+
+app.get('/api/storage/status', authenticateTenant, (req, res) => {
+  const metrics = PersistentStorage.getStorageMetrics();
+  res.json(metrics);
+});
+
+// Serve frontend static build if present (e.g. inside Docker container)
+const distPath = path.resolve(process.cwd(), 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 export { app };
 
