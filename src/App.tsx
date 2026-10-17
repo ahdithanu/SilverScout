@@ -402,6 +402,16 @@ export default function App() {
   const [isDirectMailModalOpen, setIsDirectMailModalOpen] = useState(false);
   const [cadenceTasksDueOnly, setCadenceTasksDueOnly] = useState(false);
 
+  const syncLeadToDockerStorage = (lead: Lead) => {
+    try {
+      fetch(`/api/leads/${encodeURIComponent(lead.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lead)
+      }).catch(() => {});
+    } catch (_) {}
+  };
+
   const handleLogTouchpoint = async (touchpointData: Partial<ActivityLog>, shouldAdvanceStage: boolean) => {
     if (!selectedLead) return;
 
@@ -428,6 +438,9 @@ export default function App() {
 
     setSelectedLead(updatedLead);
     setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
+    if (!user || user.uid.startsWith('demo-')) {
+      syncLeadToDockerStorage(updatedLead);
+    }
 
     try {
       const leadRef = doc(db, 'leads', updatedLead.id);
@@ -452,6 +465,9 @@ export default function App() {
     const updated = enrollLeadInCadence(selectedLead, cadenceId);
     setSelectedLead(updated);
     setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    if (!user || user.uid.startsWith('demo-')) {
+      syncLeadToDockerStorage(updated);
+    }
     try {
       const leadRef = doc(db, 'leads', updated.id);
       await updateDoc(leadRef, {
@@ -472,6 +488,9 @@ export default function App() {
     const updated = advanceCadenceStep(selectedLead);
     setSelectedLead(updated);
     setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    if (!user || user.uid.startsWith('demo-')) {
+      syncLeadToDockerStorage(updated);
+    }
     try {
       const leadRef = doc(db, 'leads', updated.id);
       await updateDoc(leadRef, {
@@ -491,6 +510,9 @@ export default function App() {
       : resumeCadence(selectedLead);
     setSelectedLead(updated);
     setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    if (!user || user.uid.startsWith('demo-')) {
+      syncLeadToDockerStorage(updated);
+    }
     try {
       const leadRef = doc(db, 'leads', updated.id);
       await updateDoc(leadRef, {
@@ -507,6 +529,9 @@ export default function App() {
     const updated = markCadenceReplied(selectedLead);
     setSelectedLead(updated);
     setLeads(prev => prev.map(l => l.id === updated.id ? updated : l));
+    if (!user || user.uid.startsWith('demo-')) {
+      syncLeadToDockerStorage(updated);
+    }
     try {
       const leadRef = doc(db, 'leads', updated.id);
       await updateDoc(leadRef, {
@@ -576,6 +601,9 @@ export default function App() {
       });
       if (selectedLead && selectedLead.id === leadId) {
         setSelectedLead({ ...selectedLead, comments });
+      }
+      if (!user || user.uid.startsWith('demo-')) {
+        syncLeadToDockerStorage({ ...target, comments });
       }
     } catch (err: any) {
       console.error("Failed to add comment:", err);
@@ -1262,9 +1290,27 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
     };
   }, []);
 
-  // Leads Sync
+  // Leads Sync & Docker Volume Hydration
   useEffect(() => {
-    if (!user || user.uid.startsWith('demo-')) return;
+    if (!user || user.uid.startsWith('demo-')) {
+      fetch('/api/leads')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && Array.isArray(data.leads) && data.leads.length > 0) {
+            setLeads(prev => {
+              if (prev.length === 0) return data.leads;
+              const existingIds = new Set(prev.map(l => l.id));
+              const missing = data.leads.filter((l: Lead) => !existingIds.has(l.id));
+              return [...prev, ...missing];
+            });
+            setSelectedLead(curr => curr || data.leads[0]);
+          }
+        })
+        .catch(err => {
+          console.warn('Docker REST API leads sync bypassed:', err);
+        });
+      return;
+    }
     const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const leadsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lead));
@@ -1598,6 +1644,13 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
       } else {
         newLeads.push({ id: `sample-${Date.now()}-${Math.random().toString(36).substring(7)}`, ...fullLead } as Lead);
       }
+    }
+    if (!user || user.uid.startsWith('demo-')) {
+      fetch('/api/leads/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leads: newLeads })
+      }).catch(() => {});
     }
     setLeads(prev => [...newLeads, ...prev]);
     if (newLeads.length > 0) {

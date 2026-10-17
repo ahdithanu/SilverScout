@@ -26,9 +26,12 @@ import {
 } from './billing';
 import path from 'path';
 import fs from 'fs';
-import { DealDocument, DealStage, FundDeploymentConfig } from '../src/types';
+import { DealDocument, DealStage, FundDeploymentConfig, Lead } from '../src/types';
 import { DEFAULT_FUND_DEPLOYMENT_CONFIG } from '../src/utils/branding';
 import { PersistentStorage } from './persistentStorage';
+import { ContinuousIngestionScheduler } from '../src/utils/continuousIngestionScheduler';
+import { SAMPLE_MARKETPLACE_LISTINGS } from '../src/services/listingIngestionService';
+import { INITIAL_SEEDED_LEADS } from './seedData';
 
 dotenv.config();
 
@@ -473,6 +476,185 @@ app.get('/api/storage/status', authenticateTenant, (req, res) => {
   res.json(metrics);
 });
 
+// -----------------------------------------------------------------------------
+// PERSISTENT DATA PIPELINE: LEADS & LISTINGS CRUD (DOCKER VOLUME STORAGE)
+// -----------------------------------------------------------------------------
+
+// Ensure initial seed leads exist in volume
+try {
+  const storedLeads = PersistentStorage.loadCollection<Lead>('leads', []);
+  if (storedLeads.length === 0) {
+    PersistentStorage.saveCollection('leads', INITIAL_SEEDED_LEADS);
+  }
+} catch (err) {
+  console.warn('Persistent storage seed check warning:', err);
+}
+
+app.get('/api/leads', (req, res) => {
+  const { fundId } = req.query;
+  let leads = PersistentStorage.loadCollection<Lead>('leads', INITIAL_SEEDED_LEADS);
+  if (fundId && typeof fundId === 'string') {
+    leads = leads.filter(l => l.fundId === fundId || !l.fundId);
+  }
+  res.json({ leads, total: leads.length });
+});
+
+app.post('/api/leads', (req, res) => {
+  const newLead: Lead = req.body;
+  if (!newLead.name) {
+    return res.status(400).json({ error: 'Lead name is required' });
+  }
+  if (!newLead.id) {
+    newLead.id = `lead-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  }
+  if (!newLead.createdAt) {
+    newLead.createdAt = new Date().toISOString();
+  }
+  newLead.updatedAt = new Date().toISOString();
+
+  const leads = PersistentStorage.loadCollection<Lead>('leads', INITIAL_SEEDED_LEADS);
+  const existingIdx = leads.findIndex(l => l.id === newLead.id);
+  if (existingIdx >= 0) {
+    leads[existingIdx] = { ...leads[existingIdx], ...newLead };
+  } else {
+    leads.unshift(newLead);
+  }
+  PersistentStorage.saveCollection('leads', leads);
+
+  auditLedger.recordEvent(
+    newLead.fundId || 'redwood-cap',
+    newLead.id,
+    'LEAD_PERSISTED',
+    (req as any).user?.uid || 'system',
+    (req as any).user?.role || 'admin',
+    { leadName: newLead.name, industry: newLead.industry }
+  );
+
+  res.status(201).json({ status: 'SUCCESS', lead: newLead });
+});
+
+app.put('/api/leads/:leadId', (req, res) => {
+  const { leadId } = req.params;
+  const updates = req.body;
+  const leads = PersistentStorage.loadCollection<Lead>('leads', INITIAL_SEEDED_LEADS);
+  const idx = leads.findIndex(l => l.id === leadId);
+
+  if (idx === -1) {
+    return res.status(404).json({ error: `Lead '${leadId}' not found` });
+  }
+
+  leads[idx] = {
+    ...leads[idx],
+    ...updates,
+    id: leadId,
+    updatedAt: new Date().toISOString()
+  };
+
+  PersistentStorage.saveCollection('leads', leads);
+
+  auditLedger.recordEvent(
+    leads[idx].fundId || 'redwood-cap',
+    leadId,
+    'LEAD_UPDATED',
+    (req as any).user?.uid || 'system',
+    (req as any).user?.role || 'admin',
+    { updatedFields: Object.keys(updates) }
+  );
+
+  res.json({ status: 'SUCCESS', lead: leads[idx] });
+});
+
+app.post('/api/leads/bulk', (req, res) => {
+  const incomingList: Lead[] = req.body.leads || [];
+  if (!Array.isArray(incomingList) || incomingList.length === 0) {
+    return res.status(400).json({ error: 'Expected non-empty array of leads' });
+  }
+
+  const existing = PersistentStorage.loadCollection<Lead>('leads', INITIAL_SEEDED_LEADS);
+  const leadMap = new Map(existing.map(l => [l.id, l]));
+
+  for (const item of incomingList) {
+    const id = item.id || `lead-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    leadMap.set(id, {
+      ...item,
+      id,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  const updated = Array.from(leadMap.values());
+  PersistentStorage.saveCollection('leads', updated);
+
+  res.json({ status: 'SUCCESS', count: updated.length, upsertedCount: incomingList.length });
+});
+
+// -----------------------------------------------------------------------------
+// MULTI-DAILY LISTING INGESTION & CONTINUOUS SCHEDULER
+// -----------------------------------------------------------------------------
+const ingestionScheduler = new ContinuousIngestionScheduler();
+
+export function executeAutonomousFeedSweep() {
+  const currentLeads = PersistentStorage.loadCollection<Lead>('leads', INITIAL_SEEDED_LEADS);
+  const result = ingestionScheduler.executeSweep(currentLeads, SAMPLE_MARKETPLACE_LISTINGS);
+
+  if (result.newListingsCreated.length > 0) {
+    const merged = [...result.newListingsCreated, ...currentLeads];
+    PersistentStorage.saveCollection('leads', merged);
+  }
+
+  // Persist sweep result and deltas
+  const history = PersistentStorage.loadCollection<any>('sweeps', []);
+  history.unshift({
+    sweepId: result.sweepId,
+    timestamp: result.timestamp,
+    feedsChecked: result.feedsChecked,
+    totalListingsFetched: result.totalListingsFetched,
+    newCount: result.newListingsCreated.length,
+    deltasCount: result.deltasDetected.length,
+    duplicatesSuppressed: result.duplicatesSuppressed,
+    nextScheduledRun: result.nextScheduledRun
+  });
+  PersistentStorage.saveCollection('sweeps', history.slice(0, 50));
+
+  if (result.deltasDetected.length > 0) {
+    const existingDeltas = PersistentStorage.loadCollection<any>('deltas', []);
+    PersistentStorage.saveCollection('deltas', [...result.deltasDetected, ...existingDeltas].slice(0, 100));
+  }
+
+  auditLedger.recordEvent(
+    'redwood-cap',
+    'system-sweeper',
+    'FEED_SWEEP_EXECUTED',
+    'daemon',
+    'admin',
+    {
+      newCount: result.newListingsCreated.length,
+      deltasCount: result.deltasDetected.length,
+      suppressed: result.duplicatesSuppressed
+    }
+  );
+
+  return result;
+}
+
+app.get('/api/ingestion/sweeps', (_req, res) => {
+  const sweeps = PersistentStorage.loadCollection('sweeps', []);
+  const deltas = PersistentStorage.loadCollection('deltas', []);
+  res.json({
+    feeds: ingestionScheduler.getFeeds(),
+    recentSweeps: sweeps,
+    recentDeltas: deltas
+  });
+});
+
+app.post('/api/ingestion/trigger-sweep', (_req, res) => {
+  const result = executeAutonomousFeedSweep();
+  res.json({
+    status: 'SUCCESS',
+    sweep: result
+  });
+});
+
 // Serve frontend static build if present (e.g. inside Docker container)
 const distPath = path.resolve(process.cwd(), 'dist');
 if (fs.existsSync(distPath)) {
@@ -485,9 +667,34 @@ if (fs.existsSync(distPath)) {
 
 export { app };
 
-if (process.env.NODE_ENV !== 'test') {
+const isTestEnv = process.env.NODE_ENV === 'test' || 
+                  process.env.npm_lifecycle_event === 'test' ||
+                  process.argv.some(arg => arg.includes('test'));
+
+if (!isTestEnv) {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => {
     console.log(`Silver Scout Production Control Plane Server listening on port ${PORT}`);
+
+    // Autonomous background ingestion daemon: runs every 4 hours (14,400,000 ms)
+    const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+    setInterval(() => {
+      try {
+        console.log('[Continuous Ingestion Daemon] Starting scheduled multi-daily feed sweep...');
+        executeAutonomousFeedSweep();
+      } catch (err) {
+        console.error('[Continuous Ingestion Daemon] Sweep failed:', err);
+      }
+    }, FOUR_HOURS_MS);
+
+    // Initial boot sweep after 10s delay to hydrate fresh marketplace listings
+    setTimeout(() => {
+      try {
+        console.log('[Continuous Ingestion Daemon] Executing startup feed check...');
+        executeAutonomousFeedSweep();
+      } catch (err) {
+        console.error('[Continuous Ingestion Daemon] Initial sweep failed:', err);
+      }
+    }, 10000);
   });
 }

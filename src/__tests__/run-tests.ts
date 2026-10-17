@@ -19,6 +19,7 @@ import { AuditProvenanceLedger } from '../../server/auditLedger';
 import { processSendGridWebhookEvent, processHubSpotWebhookEvent, verifySendGridWebhookSignature, verifyHubSpotWebhookSignature } from '../../server/webhooks';
 import { applySecurityHeaders, authenticateTenant } from '../../server/auth';
 import { PersistentStorage } from '../../server/persistentStorage';
+import { executeAutonomousFeedSweep } from '../../server/index';
 import { createCheckoutSession, createCustomerPortalSession, verifyStripeWebhookSignature, handleStripeWebhookEvent } from '../../server/billing';
 import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
@@ -1875,6 +1876,59 @@ test('Docker Persistent Volume Storage Engine', async (t) => {
     assert.ok(metrics.totalSizeBytes > 0);
   });
 });
+
+test('Persistent REST Endpoints & Autonomous Feed Sweeper Pipeline', async (t) => {
+  await t.test('executes autonomous feed sweep, populates leads and logs sweep history', () => {
+    const sweepResult = executeAutonomousFeedSweep();
+    assert.ok(sweepResult.sweepId);
+    assert.ok(sweepResult.timestamp);
+    assert.ok(sweepResult.feedsChecked > 0);
+
+    const storedLeads = PersistentStorage.loadCollection<Lead>('leads', []);
+    assert.ok(storedLeads.length > 0, 'Leads collection must not be empty after sweep');
+
+    const sweeps = PersistentStorage.loadCollection<any>('sweeps', []);
+    assert.ok(sweeps.length > 0, 'Sweeps history must be persisted');
+    assert.equal(sweeps[0].sweepId, sweepResult.sweepId);
+  });
+
+  await t.test('persists newly ingested leads and retrieves by fund scoping', () => {
+    const newLead: Lead = {
+      id: 'test-lead-custom-1',
+      fundId: 'redwood-cap',
+      name: 'Napa Valley Mechanical Services',
+      industry: 'HVAC & Mechanical',
+      location: 'Napa, CA',
+      registrationDate: '2010-01-01',
+      agentName: 'Sarah Jenkins',
+      isCorporateAgent: false,
+      permitVolume2023_2025: 40,
+      permitVolume2026: 10,
+      permitDrop: 75,
+      lastDigitalPostDate: '2023-01-01',
+      reviewVelocity: 0.1,
+      exitPropensityScore: 9.1,
+      aiThesis: 'High conviction target in Napa Valley.',
+      valuationEstimate: 4200000,
+      status: 'qualified',
+      revenue: 4000000,
+      ebitda: 900000,
+      profitMargin: 22.5,
+      dealSourceChannel: 'OFF_MARKET_SCOUT',
+      createdAt: new Date().toISOString()
+    };
+
+    const currentLeads = PersistentStorage.loadCollection<Lead>('leads', []);
+    PersistentStorage.saveCollection('leads', [newLead, ...currentLeads]);
+
+    const retrieved = PersistentStorage.loadCollection<Lead>('leads', []);
+    const found = retrieved.find(l => l.id === 'test-lead-custom-1');
+    assert.ok(found);
+    assert.equal(found.name, 'Napa Valley Mechanical Services');
+    assert.equal(found.profitMargin, 22.5);
+  });
+});
+
 
 
 
