@@ -19,11 +19,11 @@ import { AuditProvenanceLedger } from '../../server/auditLedger';
 import { processSendGridWebhookEvent, processHubSpotWebhookEvent, verifySendGridWebhookSignature, verifyHubSpotWebhookSignature } from '../../server/webhooks';
 import { applySecurityHeaders, authenticateTenant, generateSignedJWT } from '../../server/auth';
 import { PersistentStorage } from '../../server/persistentStorage';
-import { executeAutonomousFeedSweep } from '../../server/index';
+import { executeAutonomousFeedSweep, app } from '../../server/index';
 import { createCheckoutSession, createCustomerPortalSession, verifyStripeWebhookSignature, handleStripeWebhookEvent } from '../../server/billing';
 import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
-import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel } from '../services/geminiService';
+import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel, auditCimWithArgon } from '../services/geminiService';
 import { generateRegistryBatch } from '../services/registryIngestionService';
 import { extractCleanDomain, getTradeFacilityBadge, resolveFacilityImagery } from '../utils/facilityImageResolver';
 import { RecursiveSemanticChunker, BM25SparseIndex, DenseVectorIndex, EnterpriseHybridRAGRetriever, EnterpriseDocument } from '../utils/ragEngine';
@@ -2004,6 +2004,211 @@ test('Persistent REST Endpoints & Autonomous Feed Sweeper Pipeline', async (t) =
     assert.ok(found);
     assert.equal(found.name, 'Napa Valley Mechanical Services');
     assert.equal(found.profitMargin, 22.5);
+  });
+});
+
+test('Authenticated Backend AI Gateway & Gemini 4 Argon Pipeline', async (t) => {
+  const validToken = generateSignedJWT({ uid: 'analyst-audit-1', role: 'associate', fundId: 'redwood-cap' });
+
+  async function dispatch(method: string, urlPath: string, options: { headers?: Record<string, string>; body?: any } = {}) {
+    const methodLower = method.toLowerCase();
+    for (const layer of (app as any)._router.stack) {
+      if (layer.route) {
+        const routePath = layer.route.path;
+        const regexPattern = routePath.replace(/:([a-zA-Z0-9_]+)/g, '(?<$1>[^/]+)');
+        const match = urlPath.match(new RegExp(`^${regexPattern}$`));
+        if (match && layer.route.methods[methodLower]) {
+          const req: any = {
+            method,
+            url: urlPath,
+            headers: { ...(options.headers || {}) },
+            params: { ...(match.groups || {}) },
+            body: options.body || {}
+          };
+          let statusCode = 200;
+          let responseData: any = null;
+          const res: any = {
+            statusCode: 200,
+            status(code: number) {
+              statusCode = code;
+              this.statusCode = code;
+              return this;
+            },
+            json(data: any) {
+              responseData = data;
+              return this;
+            },
+            send(data: any) {
+              responseData = data;
+              return this;
+            },
+            setHeader() {},
+            getHeader() {}
+          };
+
+          for (const handlerLayer of layer.route.stack) {
+            let nextCalled = false;
+            let nextErr: any = null;
+            await handlerLayer.handle(req, res, (err?: any) => {
+              nextCalled = true;
+              nextErr = err;
+            });
+            if (responseData !== null || (!nextCalled && !nextErr)) {
+              break;
+            }
+          }
+          return { status: statusCode, data: responseData };
+        }
+      }
+    }
+    throw new Error(`Route not found: ${method} ${urlPath}`);
+  }
+
+  await t.test('rejects AI generation calls without Bearer JWT token (401)', async () => {
+    const { status, data } = await dispatch('POST', '/api/funds/redwood-cap/ai/audit-cim', {
+      body: { targetName: 'Acme HVAC' }
+    });
+    assert.equal(status, 401);
+    assert.equal(data.error, 'UNAUTHORIZED');
+  });
+
+  await t.test('POST /api/funds/:fundId/ai/audit-cim executes Gemini 4 Argon QofE audit with financial assertion verification', async () => {
+    const { status, data } = await dispatch('POST', '/api/funds/redwood-cap/ai/audit-cim', {
+      headers: { authorization: `Bearer ${validToken}` },
+      body: {
+        targetName: 'Sierra Foothills Commercial Mechanical',
+        reportedRevenue: 4800000,
+        reportedEbitda: 950000,
+        reportedAddBacks: [
+          { name: 'Owner Excess Compensation', amount: 140000 },
+          { name: 'Personal Auto Depreciation', amount: 22000 }
+        ],
+        documentText: 'CONFIDENTIAL CIM: Sierra Foothills Commercial Mechanical operates commercial HVAC facilities across Northern California.'
+      }
+    });
+
+    assert.equal(status, 200);
+    assert.equal(data.status, 'SUCCESS');
+    assert.ok(data.audit);
+    assert.ok(data.audit.normalizedEbitda > 0);
+    assert.ok(data.audit.dealStructure);
+    assert.ok(data.audit.dealStructure.purchasePrice);
+    assert.ok(data.audit.addBacksAudit.length > 0);
+    assert.equal(data.guardCheck.valid, true);
+  });
+
+  await t.test('POST /api/funds/:fundId/ai/audit-cim rejects request missing required targetName (400)', async () => {
+    const { status, data } = await dispatch('POST', '/api/funds/redwood-cap/ai/audit-cim', {
+      headers: { authorization: `Bearer ${validToken}` },
+      body: { reportedRevenue: 4000000 }
+    });
+    assert.equal(status, 400);
+    assert.ok(data.error);
+  });
+
+  await t.test('POST /api/funds/:fundId/ai/analyze-leads returns evaluated leads with exit propensity and PE thesis', async () => {
+    const { status, data } = await dispatch('POST', '/api/funds/redwood-cap/ai/analyze-leads', {
+      headers: { authorization: `Bearer ${validToken}` },
+      body: {
+        leads: [
+          {
+            id: 'lead-test-1',
+            name: 'Delta Plumbing Systems',
+            industry: 'Commercial Plumbing',
+            location: 'Stockton, CA',
+            registrationDate: '1998-04-12',
+            permitDrop: 45,
+            isCorporateAgent: false,
+            revenue: 3800000,
+            ebitda: 760000
+          }
+        ],
+        useThinkingMode: true
+      }
+    });
+
+    assert.equal(status, 200);
+    assert.equal(data.status, 'SUCCESS');
+    assert.ok(Array.isArray(data.results));
+    assert.equal(data.results.length, 1);
+    assert.ok(data.results[0].exitPropensityScore > 0);
+    assert.ok(data.results[0].aiThesis);
+  });
+
+  await t.test('POST /api/funds/:fundId/ai/ic-memo returns 1-page IC memo with verified deal structure', async () => {
+    const { status, data } = await dispatch('POST', '/api/funds/redwood-cap/ai/ic-memo', {
+      headers: { authorization: `Bearer ${validToken}` },
+      body: {
+        lead: {
+          id: 'lead-test-2',
+          name: 'Valley Precision Tool & Die',
+          industry: 'Precision Machining',
+          location: 'Modesto, CA',
+          registrationDate: '1985-09-20',
+          permitDrop: 55,
+          revenue: 4200000,
+          ebitda: 920000
+        }
+      }
+    });
+
+    assert.equal(status, 200);
+    assert.equal(data.status, 'SUCCESS');
+    assert.ok(data.memo.dealSummary);
+    assert.ok(data.memo.executiveSummary);
+    assert.ok(data.memo.investmentHighlights.length >= 3);
+    assert.ok(data.memo.dealStructure.recommendedPrice);
+    assert.equal(data.guardCheck.valid, true);
+  });
+
+  await t.test('POST /api/funds/:fundId/ai/generate-cadence produces 3-touch multi-channel outreach sequence', async () => {
+    const { status, data } = await dispatch('POST', '/api/funds/redwood-cap/ai/generate-cadence', {
+      headers: { authorization: `Bearer ${validToken}` },
+      body: {
+        lead: {
+          name: 'Central Valley Industrial Air',
+          industry: 'HVAC & Mechanical',
+          location: 'Fresno, CA',
+          agentName: 'Robert Vance'
+        }
+      }
+    });
+
+    assert.equal(status, 200);
+    assert.equal(data.status, 'SUCCESS');
+    assert.ok(data.sequence.touch1_DirectMail.body);
+    assert.ok(data.sequence.touch2_ColdEmail.body);
+    assert.ok(data.sequence.touch3_PhoneScript.body);
+  });
+
+  await t.test('POST /api/funds/:fundId/ai/parse-financials extracts EBITDA and owner add-backs', async () => {
+    const sampleBase64 = Buffer.from('FAKE_FINANCIAL_PDF_CONTENT').toString('base64');
+    const { status, data } = await dispatch('POST', '/api/funds/redwood-cap/ai/parse-financials', {
+      headers: { authorization: `Bearer ${validToken}` },
+      body: {
+        fileBase64: sampleBase64,
+        mimeType: 'application/pdf'
+      }
+    });
+
+    assert.equal(status, 200);
+    assert.equal(data.status, 'SUCCESS');
+    assert.ok(data.financials.revenue > 0);
+    assert.ok(data.financials.ebitda > 0);
+    assert.ok(Array.isArray(data.financials.suggestedAddBacks));
+  });
+
+  await t.test('auditCimWithArgon client helper executes end-to-end and returns guarded audit', async () => {
+    const result = await auditCimWithArgon({
+      targetName: 'California Commercial Controls',
+      reportedRevenue: 5200000,
+      reportedEbitda: 1100000
+    }, 'redwood-cap');
+
+    assert.ok(result.audit);
+    assert.ok(result.audit.auditSummary.includes('California Commercial Controls'));
+    assert.equal(result.audit.modelUsed, 'gemini-4-argon');
+    assert.equal(result.guardCheck.valid, true);
   });
 });
 

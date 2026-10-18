@@ -23,8 +23,13 @@ export function validateLLMOutputAgainstFinancialFacts(
 
   // If LLM returns valuation or deal structure, check for gross mismatch with EBITDA
   if (llmOutput && llmOutput.dealStructure && llmOutput.dealStructure.purchasePrice) {
-    const rawPrice = String(llmOutput.dealStructure.purchasePrice).replace(/[^0-9.]/g, '');
-    const priceNum = parseFloat(rawPrice);
+    const priceStr = String(llmOutput.dealStructure.purchasePrice).trim();
+    let multiplier = 1;
+    if (/m\b|\bm|m$/i.test(priceStr)) multiplier = 1000000;
+    else if (/k\b|\bk|k$/i.test(priceStr)) multiplier = 1000;
+    const rawPrice = priceStr.replace(/[^0-9.]/g, '');
+    let priceNum = parseFloat(rawPrice);
+    if (!isNaN(priceNum)) priceNum *= multiplier;
 
     if (!isNaN(priceNum) && priceNum > 0 && authoritativeFacts.ebitda > 0) {
       const impliedMultiple = priceNum / authoritativeFacts.ebitda;

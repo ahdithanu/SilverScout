@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Check, Sparkles, CreditCard, ShieldCheck, Zap, ExternalLink, Building2, CheckCircle2 } from 'lucide-react';
 import { SUBSCRIPTION_PLANS, SubscriptionTier, BillingInterval } from '../../utils/billing';
 import { Button } from '../../App';
+import { getClientAuthToken } from '../../services/geminiService';
 
 interface BillingSubscriptionModalProps {
   show: boolean;
@@ -42,11 +43,12 @@ export const BillingSubscriptionModal: React.FC<BillingSubscriptionModalProps> =
     setCheckoutSuccessMessage(null);
 
     try {
+      const token = await getClientAuthToken(fundId);
       const res = await fetch(`/api/funds/${fundId}/billing/checkout-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer operator:partner:${fundId}`
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
           planId: tier,
@@ -84,11 +86,12 @@ export const BillingSubscriptionModal: React.FC<BillingSubscriptionModalProps> =
   const handleOpenCustomerPortal = async () => {
     setPortalLoading(true);
     try {
+      const token = await getClientAuthToken(fundId);
       const res = await fetch(`/api/funds/${fundId}/billing/portal-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer operator:partner:${fundId}`
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
           stripeCustomerId: 'cus_silver_scout_fund',
