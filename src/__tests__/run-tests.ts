@@ -17,7 +17,7 @@ import { TransactionalOutboxManager } from '../../server/outbox';
 import { validateLLMOutputAgainstFinancialFacts } from '../../server/financialGuard';
 import { AuditProvenanceLedger } from '../../server/auditLedger';
 import { processSendGridWebhookEvent, processHubSpotWebhookEvent, verifySendGridWebhookSignature, verifyHubSpotWebhookSignature } from '../../server/webhooks';
-import { applySecurityHeaders, authenticateTenant } from '../../server/auth';
+import { applySecurityHeaders, authenticateTenant, generateSignedJWT } from '../../server/auth';
 import { PersistentStorage } from '../../server/persistentStorage';
 import { executeAutonomousFeedSweep } from '../../server/index';
 import { createCheckoutSession, createCustomerPortalSession, verifyStripeWebhookSignature, handleStripeWebhookEvent } from '../../server/billing';
@@ -971,10 +971,86 @@ test('Zero-Trust Multi-Tenant Isolation & Authentication Guard', async (t) => {
     assert.equal(jsonResponse?.error, 'UNAUTHORIZED');
   });
 
-  await t.test('blocks cross-tenant access when caller fund differs from route fund (403)', () => {
-    // User from fund-b attempts to query fund-a
-    const req = {
+  await t.test('rejects forged, tampered, or plaintext tokens without valid signature (401)', () => {
+    // Attempt 1: Plaintext pseudo-token
+    const req1 = {
       headers: { authorization: 'Bearer user_123:associate:fund-b' },
+      params: { fundId: 'redwood-cap' }
+    } as any;
+    let statusCode1 = 200;
+    let jsonResponse1: any = null;
+    const res1 = {
+      status: (code: number) => {
+        statusCode1 = code;
+        return { json: (data: any) => { jsonResponse1 = data; } };
+      }
+    } as any;
+    let nextCalled1 = false;
+    authenticateTenant(req1, res1, () => { nextCalled1 = true; });
+
+    assert.equal(nextCalled1, false);
+    assert.equal(statusCode1, 401);
+    assert.equal(jsonResponse1?.error, 'INVALID_TOKEN');
+
+    // Attempt 2: Valid JWT structure but signature forged/tampered with
+    const validToken = generateSignedJWT({ uid: 'attacker', role: 'associate', fundId: 'fund-b' });
+    const parts = validToken.split('.');
+    const forgedToken = `${parts[0]}.${parts[1]}.badsignature12345`;
+
+    const req2 = {
+      headers: { authorization: `Bearer ${forgedToken}` },
+      params: { fundId: 'redwood-cap' }
+    } as any;
+    let statusCode2 = 200;
+    let jsonResponse2: any = null;
+    const res2 = {
+      status: (code: number) => {
+        statusCode2 = code;
+        return { json: (data: any) => { jsonResponse2 = data; } };
+      }
+    } as any;
+    let nextCalled2 = false;
+    authenticateTenant(req2, res2, () => { nextCalled2 = true; });
+
+    assert.equal(nextCalled2, false);
+    assert.equal(statusCode2, 401);
+    assert.equal(jsonResponse2?.error, 'INVALID_TOKEN');
+  });
+
+  await t.test('rejects expired JWT token (401)', () => {
+    const expiredToken = generateSignedJWT({
+      uid: 'user_expired',
+      role: 'partner',
+      fundId: 'redwood-cap',
+      exp: Math.floor(Date.now() / 1000) - 3600 // Expired 1 hour ago
+    });
+
+    const req = {
+      headers: { authorization: `Bearer ${expiredToken}` },
+      params: { fundId: 'redwood-cap' }
+    } as any;
+    let statusCode = 200;
+    let jsonResponse: any = null;
+    const res = {
+      status: (code: number) => {
+        statusCode = code;
+        return { json: (data: any) => { jsonResponse = data; } };
+      }
+    } as any;
+    let nextCalled = false;
+    authenticateTenant(req, res, () => { nextCalled = true; });
+
+    assert.equal(nextCalled, false);
+    assert.equal(statusCode, 401);
+    assert.equal(jsonResponse?.error, 'INVALID_TOKEN');
+    assert.match(jsonResponse?.details, /expired/i);
+  });
+
+  await t.test('blocks cross-tenant access when caller fund differs from route fund (403)', () => {
+    // Validly signed user from fund-b attempts to query redwood-cap
+    const token = generateSignedJWT({ uid: 'user_123', role: 'associate', fundId: 'fund-b' });
+    const req = {
+      headers: { authorization: `Bearer ${token}` },
       params: { fundId: 'redwood-cap' }
     } as any;
     let statusCode = 200;
@@ -999,8 +1075,9 @@ test('Zero-Trust Multi-Tenant Isolation & Authentication Guard', async (t) => {
   });
 
   await t.test('permits tenant member accessing own fund resources', () => {
+    const token = generateSignedJWT({ uid: 'partner_1', role: 'partner', fundId: 'redwood-cap' });
     const req = {
-      headers: { authorization: 'Bearer partner_1:partner:redwood-cap' },
+      headers: { authorization: `Bearer ${token}` },
       params: { fundId: 'redwood-cap' }
     } as any;
     let nextCalled = false;
@@ -1014,8 +1091,9 @@ test('Zero-Trust Multi-Tenant Isolation & Authentication Guard', async (t) => {
   });
 
   await t.test('allows global admin role cross-tenant audit access', () => {
+    const token = generateSignedJWT({ uid: 'super_admin', role: 'admin', fundId: 'central-ops' });
     const req = {
-      headers: { authorization: 'Bearer super_admin:admin:central-ops' },
+      headers: { authorization: `Bearer ${token}` },
       params: { fundId: 'redwood-cap' }
     } as any;
     let nextCalled = false;

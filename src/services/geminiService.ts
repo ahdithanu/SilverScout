@@ -1,7 +1,11 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { Lead, BusinessProfile } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const clientApiKey = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY)
+  ? process.env.GEMINI_API_KEY
+  : (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GEMINI_API_KEY) || '';
+
+const ai = new GoogleGenAI({ apiKey: clientApiKey || 'unconfigured' });
 
 export const STATE_AREA_CODES: Record<string, string> = {
   'AL': '205', 'AK': '907', 'AZ': '602', 'AR': '501', 'CA': '916', 'CO': '303',
