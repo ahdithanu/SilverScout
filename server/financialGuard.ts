@@ -49,3 +49,58 @@ export function validateLLMOutputAgainstFinancialFacts(
     deterministicFacts: authoritativeFacts
   };
 }
+
+export function parseAbbreviatedFinancialNumber(raw: string | number): number {
+  if (typeof raw === 'number') return raw;
+  const str = String(raw).trim();
+  let multiplier = 1;
+  if (/b\b|\bb|b$/i.test(str)) multiplier = 1e9;
+  else if (/m\b|\bm|m$/i.test(str)) multiplier = 1e6;
+  else if (/k\b|\bk|k$/i.test(str)) multiplier = 1e3;
+  const num = parseFloat(str.replace(/[^0-9.]/g, ''));
+  return isNaN(num) ? 0 : num * multiplier;
+}
+
+export function verifyFinancialMultipleSanity(params: {
+  enterpriseValue: string | number;
+  reportedEbitda: string | number;
+  claimedMultiple?: string | number;
+}): {
+  valid: boolean;
+  calculatedMultiple: number;
+  evDollars: number;
+  ebitdaDollars: number;
+  anomalyReason?: string;
+} {
+  const evDollars = parseAbbreviatedFinancialNumber(params.enterpriseValue);
+  const ebitdaDollars = parseAbbreviatedFinancialNumber(params.reportedEbitda);
+
+  if (ebitdaDollars <= 0 || evDollars <= 0) {
+    return {
+      valid: false,
+      calculatedMultiple: 0,
+      evDollars,
+      ebitdaDollars,
+      anomalyReason: 'Enterprise Value and Reported EBITDA must be positive non-zero values'
+    };
+  }
+
+  const calculatedMultiple = Number((evDollars / ebitdaDollars).toFixed(2));
+  if (calculatedMultiple < 1.0 || calculatedMultiple > 15.0) {
+    return {
+      valid: false,
+      calculatedMultiple,
+      evDollars,
+      ebitdaDollars,
+      anomalyReason: `Calculated multiple ${calculatedMultiple}x falls outside institutional SMB guardrail bounds [1.0x - 15.0x]`
+    };
+  }
+
+  return {
+    valid: true,
+    calculatedMultiple,
+    evDollars,
+    ebitdaDollars
+  };
+}
+

@@ -1,3 +1,5 @@
+import { PersistentStorage } from './persistentStorage';
+
 export interface QueueJob<T = any> {
   id: string;
   type: 'ic-memo' | 'loi' | 'digital-scan' | 'pl-parser';
@@ -13,9 +15,31 @@ export interface QueueJob<T = any> {
 export class TaskQueueManager {
   private jobs: Map<string, QueueJob> = new Map();
   private maxConcurrency: number;
+  private storageKey?: string;
 
-  constructor(maxConcurrency = 50) {
+  constructor(maxConcurrency = 50, storageKey?: string) {
     this.maxConcurrency = maxConcurrency;
+    this.storageKey = storageKey;
+    if (this.storageKey) {
+      this.reloadFromDisk();
+    }
+  }
+
+  public reloadFromDisk(): void {
+    if (!this.storageKey) return;
+    const persisted = PersistentStorage.loadCollection<QueueJob>(this.storageKey, []);
+    this.jobs.clear();
+    for (const job of persisted) {
+      if (job.status === 'processing') {
+        job.status = 'pending'; // Recover in-flight jobs interrupted by crash
+      }
+      this.jobs.set(job.id, job);
+    }
+  }
+
+  private flushToDisk(): void {
+    if (!this.storageKey) return;
+    PersistentStorage.saveCollection(this.storageKey, Array.from(this.jobs.values()));
   }
 
   enqueue<T>(type: QueueJob['type'], payload: T): QueueJob<T> {
@@ -29,6 +53,7 @@ export class TaskQueueManager {
       retries: 0
     };
     this.jobs.set(id, job);
+    this.flushToDisk();
     return job;
   }
 
@@ -46,6 +71,7 @@ export class TaskQueueManager {
     if (status === 'completed' || status === 'failed') {
       job.completedAt = new Date().toISOString();
     }
+    this.flushToDisk();
   }
 
   getQueueStats() {
@@ -61,8 +87,8 @@ export class TaskQueueManager {
       else if (job.status === 'failed') failed++;
     }
 
-    return { total: this.jobs.size, pending, processing, completed, failed };
+    return { total: this.jobs.size, pending, processing, completed, failed, maxConcurrency: this.maxConcurrency };
   }
 }
 
-export const aiQueue = new TaskQueueManager(100);
+export const aiQueue = new TaskQueueManager(100, 'background_jobs');

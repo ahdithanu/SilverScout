@@ -120,13 +120,17 @@ export class AuditProvenanceLedger {
     return this.chain.filter(b => b.fundId === fundId && b.dealId === dealId);
   }
 
-  public verifyChainIntegrity(): { valid: boolean; brokenBlockIndex?: number } {
+  public getFundAuditTrail(fundId: string): AuditLedgerBlock[] {
+    return this.chain.filter(b => b.fundId === fundId);
+  }
+
+  public verifyChainIntegrity(_fundId?: string): { valid: boolean; checkedCount: number; brokenBlockIndex?: number } {
     for (let i = 1; i < this.chain.length; i++) {
       const current = this.chain[i];
       const previous = this.chain[i - 1];
 
       if (current.previousHash !== previous.currentHash) {
-        return { valid: false, brokenBlockIndex: i };
+        return { valid: false, checkedCount: i, brokenBlockIndex: i };
       }
 
       const expectedHash = this.computeHash(
@@ -141,10 +145,10 @@ export class AuditProvenanceLedger {
       );
 
       if (current.currentHash !== expectedHash) {
-        return { valid: false, brokenBlockIndex: i };
+        return { valid: false, checkedCount: i, brokenBlockIndex: i };
       }
     }
-    return { valid: true };
+    return { valid: true, checkedCount: this.chain.length };
   }
 }
 

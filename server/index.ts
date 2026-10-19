@@ -37,6 +37,8 @@ import { dbManager } from './db/index';
 import { vectorStore } from './db/vectorStore';
 import { ssoManager } from './sso/index';
 import { scimManager } from './sso/scim';
+import { fastMcpServer } from './mcp/fastMcpServer';
+import { soc2AndDrEngine } from './compliance/soc2AndDrEngine';
 
 dotenv.config();
 
@@ -1240,6 +1242,75 @@ app.post('/api/ingestion/trigger-sweep', (_req, res) => {
     sweep: result
   });
 });
+
+// -----------------------------------------------------------------------------
+// SPRINT 3: DURABLE OUTBOX STATUS & BATCH DRAIN WORKER
+// -----------------------------------------------------------------------------
+app.get('/api/funds/:fundId/outbox/status', authenticateTenant, (req, res) => {
+  const { fundId } = req.params;
+  res.json(outboxManager.getFundOutboxStatus(fundId));
+});
+
+app.post('/api/funds/:fundId/outbox/drain', authenticateTenant, async (req, res) => {
+  const { fundId } = req.params;
+  const result = await outboxManager.drainPendingOutbox(fundId);
+  res.json({ status: 'SUCCESS', ...result });
+});
+
+// -----------------------------------------------------------------------------
+// SPRINT 7: FASTMCP JSON-RPC 2.0 SERVER & CRM CONNECT
+// -----------------------------------------------------------------------------
+app.get('/api/funds/:fundId/mcp/tools', authenticateTenant, (_req, res) => {
+  res.json({
+    server: 'silver-scout-fastmcp',
+    protocolVersion: '2025-06-18',
+    tools: fastMcpServer.getTools()
+  });
+});
+
+app.post('/api/funds/:fundId/mcp/rpc', authenticateTenant, async (req, res) => {
+  const { fundId } = req.params;
+  const actorId = (req as any).user?.uid || 'mcp_agent';
+  const rpcResponse = await fastMcpServer.handleRpc(req.body, fundId, actorId);
+  res.json(rpcResponse);
+});
+
+// -----------------------------------------------------------------------------
+// SPRINT 8: SOC 2 PRE-AUDIT & CRYPTOGRAPHIC DISASTER RECOVERY (DR)
+// -----------------------------------------------------------------------------
+app.get('/api/funds/:fundId/compliance/soc2', authenticateTenant, async (req, res) => {
+  const { fundId } = req.params;
+  const report = await soc2AndDrEngine.generateSoc2Report(fundId);
+  res.json(report);
+});
+
+app.post(
+  '/api/funds/:fundId/compliance/dr/snapshot',
+  authenticateTenant,
+  requireRole(['admin', 'partner']),
+  async (req, res) => {
+    const { fundId } = req.params;
+    const actorId = (req as any).user?.uid || 'partner_dr_operator';
+    const manifest = await soc2AndDrEngine.createDisasterRecoverySnapshot(fundId, actorId);
+    res.status(201).json(manifest);
+  }
+);
+
+app.post(
+  '/api/funds/:fundId/compliance/dr/restore',
+  authenticateTenant,
+  requireRole(['admin', 'partner']),
+  async (req, res) => {
+    const { fundId } = req.params;
+    const actorId = (req as any).user?.uid || 'partner_dr_operator';
+    try {
+      const result = await soc2AndDrEngine.verifyAndRestoreSnapshot(fundId, actorId);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+);
 
 // Serve frontend static build if present (e.g. inside Docker container)
 const distPath = path.resolve(process.cwd(), 'dist');

@@ -66,13 +66,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
+import { cn, formatStatusLabel, Button, Badge, Card } from './components/common/DesignSystem';
+import { getLeadCoordinates, SAMPLE_CSV_TEMPLATE, createSampleDemoLeads } from './data/sampleDemoLeads';
+import { useLeadFiltersAndAnalytics } from './hooks/useLeadFiltersAndAnalytics';
 import { ActivityTimeline } from './components/common/ActivityTimeline';
 import { IndustryAnalyticsHub } from './components/analytics/IndustryAnalyticsHub';
 import { LenderPitchDeckModal } from './components/modals/LenderPitchDeckModal';
@@ -95,9 +91,7 @@ import {
   advanceCadenceStep, 
   pauseCadence, 
   resumeCadence, 
-  markCadenceReplied, 
-  getDueCadenceTasks,
-  isCadenceStepDue
+  markCadenceReplied
 } from './utils/cadenceEngine';
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
@@ -179,80 +173,9 @@ import {
   ZAxis
 } from 'recharts';
 
-// --- Utility ---
-export function formatStatusLabel(status: LeadStatus | string): string {
-  switch (status) {
-    case 'new': return 'New Target';
-    case 'qualified': return 'Qualified Target';
-    case 'outreach_triggered': return 'Outreach Triggered';
-    case 'in_loi': return 'Under LOI';
-    case 'archived': return 'Archived';
-    default: return status ? status.replace(/_/g, ' ') : 'Unknown';
-  }
-}
-
-// --- Components ---
-
-const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger', size?: 'xs' | 'sm' | 'md' | 'lg' }>(
-  ({ className, variant = 'primary', size = 'md', ...props }, ref) => {
-    const variants = {
-      primary: 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm',
-      secondary: 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700 shadow-sm',
-      outline: 'border border-zinc-200 bg-transparent hover:bg-zinc-50 text-zinc-700',
-      ghost: 'bg-transparent hover:bg-zinc-100 text-zinc-600',
-      danger: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
-    };
-    const sizes = {
-      xs: 'px-2 py-1 text-[10px]',
-      sm: 'px-3 py-1.5 text-xs',
-      md: 'px-4 py-2 text-sm',
-      lg: 'px-6 py-3 text-base',
-    };
-    return (
-      <button
-        ref={ref}
-        className={cn(
-          'inline-flex items-center justify-center rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:pointer-events-none disabled:opacity-50',
-          variants[variant],
-          sizes[size],
-          className
-        )}
-        {...props}
-      />
-    );
-  }
-);
-
-const Badge = ({ children, className, variant = 'default' }: { children: React.ReactNode, className?: string, variant?: 'default' | 'success' | 'warning' | 'danger' | 'info' }) => {
-  const variants = {
-    default: 'bg-zinc-100 text-zinc-700',
-    success: 'bg-emerald-100 text-emerald-700',
-    warning: 'bg-amber-100 text-amber-700',
-    danger: 'bg-red-100 text-red-700',
-    info: 'bg-blue-100 text-blue-700',
-  };
-  return (
-    <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider', variants[variant], className)}>
-      {children}
-    </span>
-  );
-};
-
-const Card = ({ children, className, onClick }: { children: React.ReactNode, className?: string, onClick?: () => void }) => (
-  <div 
-    onClick={onClick}
-    className={cn(
-      'rounded-xl border border-zinc-200 bg-white p-4 shadow-sm transition-all',
-      onClick && 'cursor-pointer hover:border-emerald-300 hover:shadow-md',
-      className
-    )}
-  >
-    {children}
-  </div>
-);
-
-export { cn, Button, Badge, Card };
+export { cn, formatStatusLabel, Button, Badge, Card };
 export type { ICMemoData, LOITerms, ExtractedFinancials, DigitalHealthScan, OutreachSequence };
+
 
 // --- Main App ---
 
@@ -787,47 +710,6 @@ export default function App() {
   const [csvImportSuccess, setCsvImportSuccess] = useState<number | null>(null);
   const [csvImportError, setCsvImportError] = useState<string | null>(null);
 
-  // Geocoding Helper for Map View
-  const cityCoordinatesMap: Record<string, { x: number; y: number }> = {
-    'stockton, ca': { x: 44, y: 42 },
-    'manteca, ca': { x: 46, y: 44 },
-    'san jose, ca': { x: 38, y: 56 },
-    'sacramento, ca': { x: 42, y: 34 },
-    'fresno, ca': { x: 58, y: 64 },
-    'san francisco, ca': { x: 32, y: 48 },
-    'oakland, ca': { x: 34, y: 46 },
-    'los angeles, ca': { x: 72, y: 82 },
-    'san diego, ca': { x: 80, y: 92 },
-    'modesto, ca': { x: 48, y: 46 },
-    'bakersfield, ca': { x: 64, y: 74 },
-    'palo alto, ca': { x: 36, y: 52 },
-    'austin, tx': { x: 60, y: 70 },
-    'dallas, tx': { x: 62, y: 55 },
-    'phoenix, az': { x: 35, y: 68 }
-  };
-
-  const getLeadCoordinates = (location: string, id: string) => {
-    const locLower = (location || '').toLowerCase().trim();
-    if (cityCoordinatesMap[locLower]) {
-      return cityCoordinatesMap[locLower];
-    }
-    const matchedKey = Object.keys(cityCoordinatesMap).find(k => {
-      const cityNameOnly = k.split(',')[0].trim();
-      return locLower.includes(cityNameOnly) || cityNameOnly.includes(locLower);
-    });
-    if (matchedKey) {
-      return cityCoordinatesMap[matchedKey];
-    }
-    let hash = 0;
-    for (let i = 0; i < (id + location).length; i++) {
-      hash = ((hash << 5) - hash) + (id + location).charCodeAt(i);
-      hash |= 0;
-    }
-    const posX = 15 + Math.abs(hash % 70);
-    const posY = 15 + Math.abs((hash >> 3) % 70);
-    return { x: posX, y: posY };
-  };
-
   // CSV Parser Function
   const parseCSVContent = (text: string) => {
     setCsvImportError(null);
@@ -942,13 +824,8 @@ export default function App() {
   };
 
   const loadSampleCSVData = () => {
-    const sampleCSV = `Business Name,Industry,Location,Revenue,EBITDA,Permit Drop,Owner Name,Tags
-Valley HVAC & Sheet Metal,HVAC,Modesto CA,4500000,900000,45,Robert Miller,family-owned;hvac
-Gold Country Plumbing,Plumbing,Sacramento CA,3200000,640000,35,David Vance,commercial;high-growth
-Pacific Tool & Die,Manufacturing,Stockton CA,5800000,1100000,50,Arthur Pendelton,manufacturing;legacy
-Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mendez,residential`;
-    setCsvRawText(sampleCSV);
-    parseCSVContent(sampleCSV);
+    setCsvRawText(SAMPLE_CSV_TEMPLATE);
+    parseCSVContent(SAMPLE_CSV_TEMPLATE);
   };
 
   const selectedOutreachLead = useMemo(() => {
@@ -1325,106 +1202,25 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
     return unsubscribe;
   }, [user]);
 
-  const dueCadenceTasks = useMemo(() => {
-    return getDueCadenceTasks(leads);
-  }, [leads]);
-
-  const filteredLeads = useMemo(() => {
-    return leads.filter(l => {
-      const matchesSearch = 
-        l.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        l.industry.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        l.location.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const score = l.exitPropensityScore || 0;
-      const matchesScore = score >= minScore && score <= maxScore;
-      const matchesPermitDrop = (l.permitDrop || 0) >= minPermitDrop;
-      
-      const matchesYear = regYear === '' || 
-        (l.registrationDate && l.registrationDate.startsWith(regYear));
-
-      const matchesTags = tagSearch === '' || 
-        (l.tags || []).some(t => t.toLowerCase().includes(tagSearch.toLowerCase()));
-
-      let matchesChannel = true;
-      if (dashboardChannelFilter === 'off_market') {
-        matchesChannel = !l.dealSourceChannel || l.dealSourceChannel === 'OFF_MARKET_SCOUT';
-      } else if (dashboardChannelFilter === 'on_market') {
-        matchesChannel = l.dealSourceChannel === 'ON_MARKET_LISTING';
-      } else if (dashboardChannelFilter === 'inbound') {
-        matchesChannel = l.dealSourceChannel === 'INBOUND_INTEREST';
-      }
-
-      const matchesCadenceDue = !cadenceTasksDueOnly || isCadenceStepDue(l);
-
-      return matchesSearch && matchesScore && matchesPermitDrop && matchesYear && matchesTags && matchesChannel && matchesCadenceDue;
-    });
-  }, [leads, searchQuery, minScore, maxScore, minPermitDrop, regYear, tagSearch, dashboardChannelFilter, cadenceTasksDueOnly]);
-
-  const stats = useMemo(() => {
-    const highPropensity = leads.filter(l => l.exitPropensityScore >= 8).length;
-    const pendingOutreach = leads.filter(l => l.status === 'qualified').length;
-    const totalValuation = leads.reduce((acc, l) => acc + (l.valuationEstimate || 0), 0);
-    return { highPropensity, pendingOutreach, totalValuation };
-  }, [leads]);
-
-  // Chart Data Preparation
-  const chartData = useMemo(() => {
-    // 1. Valuation by Industry
-    const industryMap: Record<string, number> = {};
-    leads.forEach(l => {
-      if (l.valuationEstimate) {
-        industryMap[l.industry] = (industryMap[l.industry] || 0) + l.valuationEstimate;
-      }
-    });
-    const valuationByIndustry = Object.entries(industryMap).map(([name, value]) => ({ name, value }));
-
-    // 2. Status Distribution
-    const statusMap: Record<string, number> = {};
-    leads.forEach(l => {
-      statusMap[l.status] = (statusMap[l.status] || 0) + 1;
-    });
-    const statusDistribution = Object.entries(statusMap).map(([name, value]) => ({ name, value }));
-
-    // 3. Permit Drop vs Score Correlation
-    const correlationData = leads
-      .filter(l => l.exitPropensityScore)
-      .map(l => ({
-        x: l.permitDrop,
-        y: l.exitPropensityScore,
-        name: l.name
-      }));
-
-    // 4. Status Trend Over Time
-    const trendMap: Record<string, Record<string, number>> = {};
-    leads.forEach(l => {
-      if (l.createdAt) {
-        const date = new Date(l.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        if (!trendMap[date]) {
-          trendMap[date] = { new: 0, qualified: 0, outreach_triggered: 0, archived: 0 };
-        }
-        trendMap[date][l.status] = (trendMap[date][l.status] || 0) + 1;
-      }
-    });
-    const statusTrend = Object.entries(trendMap)
-      .map(([date, counts]) => ({ date, ...counts }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    return { valuationByIndustry, statusDistribution, correlationData, statusTrend };
-  }, [leads]);
+  const {
+    dueCadenceTasks,
+    filteredLeads,
+    stats,
+    chartData,
+    availableYears
+  } = useLeadFiltersAndAnalytics({
+    leads,
+    searchQuery,
+    minScore,
+    maxScore,
+    minPermitDrop,
+    regYear,
+    tagSearch,
+    dashboardChannelFilter,
+    cadenceTasksDueOnly
+  });
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
-
-  const availableYears = useMemo(() => {
-    const years = new Set<string>();
-    leads.forEach(l => {
-      if (l.registrationDate && typeof l.registrationDate === 'string') {
-        const year = l.registrationDate.split('-')[0];
-        if (year && year.length === 4) years.add(year);
-      }
-    });
-    return Array.from(years).sort((a, b) => b.localeCompare(a));
-  }, [leads]);
 
   useEffect(() => {
     if (profile?.systemPrompt) {
@@ -1464,168 +1260,7 @@ Bay Area Electrical Services,Electrical,Oakland CA,2900000,580000,20,Carlos Mend
 
   const handleIngestSample = async () => {
     const creatorId = user?.uid || 'demo-partner-1';
-    const sampleLeads: Partial<Lead>[] = [
-      {
-        name: "Manteca HVAC Solutions",
-        industry: "HVAC & Mechanical",
-        location: "Manteca, CA",
-        address: "1140 Industrial Park Dr, Manteca, CA 95337",
-        phone: "(209) 823-1490",
-        email: "contact@mantecahvac.com",
-        website: "https://www.mantecahvac.com",
-        registrationDate: "2002-05-14",
-        agentName: "Robert Miller",
-        isCorporateAgent: false,
-        permitVolume2023_2025: 45,
-        permitVolume2026: 12,
-        permitDrop: 73,
-        lastDigitalPostDate: "2023-11-20",
-        reviewVelocity: 0.2,
-        revenue: 3400000,
-        ebitda: 748000,
-        profitMargin: 22,
-        valuationEstimate: 3366000,
-        exitPropensityScore: 8.8,
-        fundId: 'redwood-cap',
-        dealSourceChannel: 'OFF_MARKET_SCOUT',
-        status: 'qualified',
-        businessProfile: {
-          streetAddress: "1140 Industrial Park Dr, Manteca, CA 95337",
-          phone: "(209) 823-1490",
-          email: "contact@mantecahvac.com",
-          website: "https://www.mantecahvac.com",
-          ownerTitle: "Founder & President",
-          employeeCount: 22,
-          yearEstablished: 2002,
-          entityType: "S-Corporation",
-          facilitySqFt: 14000,
-          fleetSize: 14,
-          coreServices: ['Commercial HVAC Installation', 'Preventative Maintenance (PMA)', 'Industrial Controls', '24/7 Mechanical Dispatch'],
-          googleRating: 4.7,
-          totalReviews: 64,
-          licenseNumber: "CA-LIC#819204",
-          bbbRating: "A+",
-          businessDescription: "Full-service commercial HVAC contractor with 24 years operating history in San Joaquin County, specializing in commercial rooftop retrofits and institutional maintenance contracts."
-        },
-        socialLinks: {
-          website: "https://www.mantecahvac.com",
-          linkedin: "https://www.linkedin.com/company/manteca-hvac",
-          twitter: "https://twitter.com/mantecahvac"
-        },
-        tags: ['Off-Market', 'Permit Contraction', 'Retirement Candidate', '22 Staff'],
-        aiThesis: "Proprietary acquisition target in Manteca, CA. 24 years operating history under founder Robert Miller. 73% permit contraction signals urgent owner fatigue; clean 22% EBITDA makes this an ideal tuck-in candidate.",
-        aiStrengths: ['24-year continuous municipal brand presence', 'Clean 22% EBITDA margin ($748k clean cash flow)', 'Zero active digital ad spend or marketing', 'Owned 14,000 sq ft warehouse facility & 14-van fleet'],
-        aiWeaknesses: ['73% permit contraction indicating operational deceleration', 'High founder key-man reliance'],
-        createdAt: new Date().toISOString(),
-        createdBy: creatorId,
-      },
-      {
-        name: "San Jose Precision Plumbing",
-        industry: "Commercial Plumbing",
-        location: "San Jose, CA",
-        address: "2250 Junction Ave, San Jose, CA 95131",
-        phone: "(408) 432-8810",
-        email: "info@sanjoseplumbing.com",
-        website: "https://www.sanjoseplumbing.com",
-        registrationDate: "1998-03-22",
-        agentName: "Law Offices of Smith & Co",
-        isCorporateAgent: true,
-        permitVolume2023_2025: 120,
-        permitVolume2026: 115,
-        permitDrop: 4,
-        lastDigitalPostDate: "2026-03-01",
-        reviewVelocity: 4.5,
-        revenue: 6800000,
-        ebitda: 1428000,
-        profitMargin: 21,
-        valuationEstimate: 6426000,
-        exitPropensityScore: 5.2,
-        fundId: 'redwood-cap',
-        dealSourceChannel: 'OFF_MARKET_SCOUT',
-        status: 'new',
-        businessProfile: {
-          streetAddress: "2250 Junction Ave, San Jose, CA 95131",
-          phone: "(408) 432-8810",
-          email: "info@sanjoseplumbing.com",
-          website: "https://www.sanjoseplumbing.com",
-          ownerTitle: "Managing Principal",
-          employeeCount: 42,
-          yearEstablished: 1998,
-          entityType: "C-Corporation",
-          facilitySqFt: 18500,
-          fleetSize: 24,
-          coreServices: ['Commercial Plumbing Systems', 'Industrial Hydronic Boilers', 'Backflow Prevention & Jetting', 'Underground Utilities'],
-          googleRating: 4.8,
-          totalReviews: 142,
-          licenseNumber: "CA-LIC#749210",
-          bbbRating: "A+",
-          businessDescription: "Silicon Valley commercial plumbing firm with extensive high-density residential and tech campus piping contracts across Santa Clara County."
-        },
-        socialLinks: {
-          website: "https://www.sanjoseplumbing.com",
-          linkedin: "https://www.linkedin.com/company/sj-precision-plumbing"
-        },
-        tags: ['Off-Market', 'Corporate Agent', 'Stable Volume', '42 Staff'],
-        aiThesis: "Corporate-managed plumbing operation with stable permit flow and active modern marketing. Low seller fatigue; candidate for secondary consolidation at market multiple.",
-        aiStrengths: ['High revenue scale ($6.8M) with stable commercial accounts', 'Strong digital presence with 4.5 reviews/month', 'Modern 24-vehicle fleet with computerized dispatch'],
-        aiWeaknesses: ['Corporate agent with institutional ownership structure', 'Low exit urgency; minimal discount opportunity'],
-        createdAt: new Date().toISOString(),
-        createdBy: creatorId,
-      },
-      {
-        name: "Central Valley Tool & Die",
-        industry: "Precision Machining",
-        location: "Stockton, CA",
-        address: "3480 E Fremont St, Stockton, CA 95205",
-        phone: "(209) 948-2200",
-        email: "admin@centralvalleytool.com",
-        website: "https://www.centralvalleytool.com",
-        registrationDate: "1985-08-10",
-        agentName: "Gary Thompson",
-        isCorporateAgent: false,
-        permitVolume2023_2025: 30,
-        permitVolume2026: 5,
-        permitDrop: 83,
-        lastDigitalPostDate: "2021-05-12",
-        reviewVelocity: 0.1,
-        revenue: 4200000,
-        ebitda: 1008000,
-        profitMargin: 24,
-        valuationEstimate: 4536000,
-        exitPropensityScore: 9.4,
-        fundId: 'redwood-cap',
-        dealSourceChannel: 'OFF_MARKET_SCOUT',
-        status: 'qualified',
-        businessProfile: {
-          streetAddress: "3480 E Fremont St, Stockton, CA 95205",
-          phone: "(209) 948-2200",
-          email: "admin@centralvalleytool.com",
-          website: "https://www.centralvalleytool.com",
-          ownerTitle: "Founder & Master Machinist",
-          employeeCount: 28,
-          yearEstablished: 1985,
-          entityType: "S-Corporation",
-          facilitySqFt: 24000,
-          fleetSize: 6,
-          coreServices: ['5-Axis CNC Precision Machining', 'Tool & Die Fabrication', 'AS9100 Aerospace Tooling', 'Heavy Stamping Dies'],
-          googleRating: 4.6,
-          totalReviews: 38,
-          licenseNumber: "CA-LIC#691823",
-          bbbRating: "A+",
-          businessDescription: "High-precision tool, die, and CNC machine shop serving agricultural and industrial equipment manufacturing throughout Northern California for over four decades."
-        },
-        socialLinks: {
-          website: "https://www.centralvalleytool.com",
-          linkedin: "https://www.linkedin.com/company/cv-tool-die"
-        },
-        tags: ['Off-Market', 'Critical Fatigue', 'Single Owner', '28 Staff'],
-        aiThesis: "Critical off-market machining candidate in Stockton, CA. 41 years in operation. 83% drop in commercial activity with dormant digital presence (last post 2021). High probability of founder retirement without internal successor.",
-        aiStrengths: ['41-year defense/aerospace supply history', 'Superior 24% EBITDA margin ($1.01M cash flow)', 'Defensible proprietary tooling and 24,000 sq ft facility'],
-        aiWeaknesses: ['Severe 83% permit and activity drop', 'Owner is sole point of contact for customer accounts'],
-        createdAt: new Date().toISOString(),
-        createdBy: creatorId,
-      }
-    ];
+    const sampleLeads = createSampleDemoLeads(creatorId);
 
     const newLeads: Lead[] = [];
     for (const lead of sampleLeads) {

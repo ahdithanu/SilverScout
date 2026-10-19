@@ -27,6 +27,10 @@ import { dbManager } from '../../server/db/index';
 import { EnterpriseVectorStore, vectorStore } from '../../server/db/vectorStore';
 import { ssoManager } from '../../server/sso/index';
 import { scimManager } from '../../server/sso/scim';
+import { fastMcpServer } from '../../server/mcp/fastMcpServer';
+import { soc2AndDrEngine } from '../../server/compliance/soc2AndDrEngine';
+import { formatStatusLabel } from '../components/common/DesignSystem';
+import { createSampleDemoLeads } from '../data/sampleDemoLeads';
 import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
 import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel, auditCimWithArgon } from '../services/geminiService';
@@ -2452,6 +2456,203 @@ test('Enterprise SSO (SAML/OIDC) & SCIM 2.0 Provisioning Engine', async (t) => {
 
     const fetched = scimManager.getUser('redwood-cap', user.id);
     assert.equal(fetched, null);
+  });
+});
+
+test('Sprint 3: Durable Transactional Outbox & Persistent Queue Crash Recovery', async (t) => {
+  await t.test('persists outbox records to durable storage and recovers across manager restarts', async () => {
+    const testStorageKey = `outbox_test_${Date.now()}`;
+    const manager1 = new TransactionalOutboxManager(testStorageKey);
+
+    const rec = manager1.createOutboxRecord(
+      'redwood-cap',
+      'deal-durable-01',
+      'SEND_OUTREACH_EMAIL',
+      { to: 'founder@target.com', subject: 'Acquisition Inquiry' },
+      'sendgrid'
+    );
+    assert.equal(rec.status, 'PENDING');
+
+    // Simulate process restart by instantiating a second manager reading the same storage key
+    const manager2 = new TransactionalOutboxManager(testStorageKey);
+    const recovered = manager2.getRecord(rec.outboxId);
+    assert.ok(recovered);
+    assert.equal(recovered.dealId, 'deal-durable-01');
+    assert.equal(recovered.status, 'PENDING');
+
+    // Drain pending outbox items
+    const drainResult = await manager2.drainPendingOutbox('redwood-cap', async () => true);
+    assert.equal(drainResult.processed, 1);
+    assert.equal(drainResult.succeeded, 1);
+
+    const completedRec = manager2.getRecord(rec.outboxId);
+    assert.equal(completedRec?.status, 'COMPLETED');
+  });
+
+  await t.test('transitions failing outbox records to DEAD_LETTER and supports operator replay', async () => {
+    const testStorageKey = `outbox_dlq_${Date.now()}`;
+    const manager = new TransactionalOutboxManager(testStorageKey);
+
+    const rec = manager.createOutboxRecord(
+      'redwood-cap',
+      'deal-dlq-99',
+      'SYNC_CRM_DEAL',
+      { dealName: 'Failing CRM Sync' },
+      'hubspot'
+    );
+
+    // Fail 3 times to trigger DEAD_LETTER
+    for (let i = 0; i < 3; i++) {
+      await manager.processPendingOutboxItem(rec.outboxId, async () => false);
+    }
+
+    const dlqRecord = manager.getRecord(rec.outboxId);
+    assert.equal(dlqRecord?.status, 'DEAD_LETTER');
+    assert.equal(dlqRecord?.retryCount, 3);
+
+    // Operator replays DEAD_LETTER item
+    const replayed = manager.replayDeadLetter(rec.outboxId, 'redwood-cap', 'partner_1');
+    assert.equal(replayed.status, 'PENDING');
+    assert.equal(replayed.retryCount, 0);
+  });
+
+  await t.test('TaskQueueManager persists background jobs to disk and recovers in-flight jobs', () => {
+    const queueKey = `jobs_test_${Date.now()}`;
+    const q1 = new TaskQueueManager(25, queueKey);
+    const job = q1.enqueue('ic-memo', { leadId: 'lead-101' });
+    q1.updateJobStatus(job.id, 'processing');
+
+    // Simulate server crash while job was 'processing'
+    const q2 = new TaskQueueManager(25, queueKey);
+    const recoveredJob = q2.getJob(job.id);
+    assert.ok(recoveredJob);
+    assert.equal(recoveredJob.status, 'pending'); // Automatically recovered from processing -> pending
+  });
+});
+
+test('Sprint 5: Modular Design System & Sample Pipeline Data Helpers', async (t) => {
+  await t.test('formats lead status labels deterministically', () => {
+    assert.equal(formatStatusLabel('new'), 'New Target');
+    assert.equal(formatStatusLabel('qualified'), 'Qualified Target');
+    assert.equal(formatStatusLabel('outreach_triggered'), 'Outreach Triggered');
+    assert.equal(formatStatusLabel('in_loi'), 'Under LOI');
+    assert.equal(formatStatusLabel('archived'), 'Archived');
+  });
+
+  await t.test('creates structured sample demo leads with complete financial and business profiles', () => {
+    const leads = createSampleDemoLeads('partner_test');
+    assert.equal(leads.length, 3);
+    assert.equal(leads[0].name, 'Manteca HVAC Solutions');
+    assert.equal(leads[0].createdBy, 'partner_test');
+    assert.ok((leads[0].ebitda || 0) > 500000);
+    assert.ok(leads[0].businessProfile?.licenseNumber);
+  });
+});
+
+test('Sprint 7: FastMCP JSON-RPC 2.0 Server & Zero-Trust CRM Connect', async (t) => {
+  await t.test('initializes MCP protocol handshake and lists available tools', async () => {
+    const initRes = await fastMcpServer.handleRpc(
+      { jsonrpc: '2.0', id: 1, method: 'initialize' },
+      'redwood-cap'
+    );
+    assert.equal(initRes.result.serverInfo.name, 'silver-scout-fastmcp');
+
+    const listRes = await fastMcpServer.handleRpc(
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+      'redwood-cap'
+    );
+    assert.ok(Array.isArray(listRes.result.tools));
+    assert.equal(listRes.result.tools.length, 4);
+  });
+
+  await t.test('blocks cross-tenant MCP tool execution attempts (-32001)', async () => {
+    const crossTenantCall = await fastMcpServer.handleRpc(
+      {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'search_acquisition_leads',
+          arguments: { fundId: 'rival-fund-xyz' }
+        }
+      },
+      'redwood-cap'
+    );
+    assert.ok(crossTenantCall.error);
+    assert.equal(crossTenantCall.error.code, -32001);
+    assert.ok(crossTenantCall.error.message.includes('Cross-tenant MCP tool call blocked'));
+  });
+
+  await t.test('executes audit_cim_financials and sync_lead_to_salesforce_dmo tools', async () => {
+    const auditCall = await fastMcpServer.handleRpc(
+      {
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: {
+          name: 'audit_cim_financials',
+          arguments: {
+            fundId: 'redwood-cap',
+            targetName: 'Apex Precision HVAC',
+            enterpriseValue: '$4.56M',
+            reportedEbitda: '$800k',
+            claimedMultiple: '5.7x'
+          }
+        }
+      },
+      'redwood-cap'
+    );
+    assert.equal(auditCall.result.isError, false);
+    const parsedAudit = JSON.parse(auditCall.result.content[0].text);
+    assert.equal(parsedAudit.valid, true);
+    assert.equal(parsedAudit.calculatedMultiple, 5.7);
+
+    const syncCall = await fastMcpServer.handleRpc(
+      {
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: {
+          name: 'sync_lead_to_salesforce_dmo',
+          arguments: {
+            fundId: 'redwood-cap',
+            leadId: 'lead-mcp-77',
+            companyName: 'Sierra Commercial Plumbing',
+            industry: 'Plumbing',
+            location: 'Sacramento, CA',
+            ebitda: 950000
+          }
+        }
+      },
+      'redwood-cap'
+    );
+    assert.equal(syncCall.result.isError, false);
+    const parsedSync = JSON.parse(syncCall.result.content[0].text);
+    assert.ok(parsedSync.outboxId);
+    assert.equal(parsedSync.dmo.CompanyName__c, 'Sierra Commercial Plumbing');
+  });
+});
+
+test('Sprint 8: SOC 2 Trust Services Criteria Pre-Audit & Cryptographic Disaster Recovery', async (t) => {
+  await t.test('generates 100% compliant SOC 2 Type II readiness report across all 5 Trust Services Criteria', async () => {
+    const report = await soc2AndDrEngine.generateSoc2Report('redwood-cap');
+    assert.equal(report.fundId, 'redwood-cap');
+    assert.equal(report.overallStatus, 'COMPLIANT');
+    assert.equal(report.readinessScore, 100);
+    assert.equal(report.controls.length, 5);
+    assert.ok(report.controls.every(c => c.status === 'PASS'));
+  });
+
+  await t.test('creates SHA-256 signed Disaster Recovery snapshot and verifies integrity on restore', async () => {
+    const manifest = await soc2AndDrEngine.createDisasterRecoverySnapshot('redwood-cap', 'partner_1');
+    assert.ok(manifest.snapshotId.startsWith('dr-snap-redwood-cap-'));
+    assert.equal(manifest.sha256Digest.length, 64);
+
+    const restoreResult = await soc2AndDrEngine.verifyAndRestoreSnapshot('redwood-cap', 'partner_1');
+    assert.equal(restoreResult.restored, true);
+    assert.equal(restoreResult.digestVerified, true);
+    assert.equal(restoreResult.snapshotId, manifest.snapshotId);
+    assert.ok(restoreResult.rtoMs > 0 && restoreResult.rtoMs < 5000);
   });
 });
 

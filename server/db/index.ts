@@ -59,8 +59,10 @@ export class DatabaseManager {
     return { success: true, applied };
   }
 
-  public getStatus(): DatabaseStatus {
+  public getStatus(): DatabaseStatus & { initialized: boolean; mode: string } {
     return {
+      initialized: true,
+      mode: this.engineType,
       connected: this.isConnected,
       engine: this.engineType,
       databaseUrlConfigured: !!this.databaseUrl,
@@ -74,6 +76,10 @@ export class DatabaseManager {
   public async getLeads(fundId: string): Promise<Lead[]> {
     const allLeads = PersistentStorage.loadCollection<Lead>('leads', []);
     return allLeads.filter(l => (l.fundId || 'redwood-cap') === fundId);
+  }
+
+  public async getLeadsByFund(fundId: string): Promise<Lead[]> {
+    return this.getLeads(fundId);
   }
 
   /**
@@ -97,6 +103,10 @@ export class DatabaseManager {
 
     PersistentStorage.saveCollection('leads', allLeads);
     return leadWithFund;
+  }
+
+  public async saveLead(fundId: string, lead: Lead): Promise<Lead> {
+    return this.upsertLead(fundId, lead);
   }
 
   /**

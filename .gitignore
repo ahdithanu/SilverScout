@@ -8,5 +8,5 @@ coverage/
 !.env.example
 .firebase/
 .ipynb_checkpoints/
-data/
+/data/
 *.zip
