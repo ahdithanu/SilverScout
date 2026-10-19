@@ -35,6 +35,33 @@ export async function getClientAuthToken(fundId: string = 'redwood-cap'): Promis
   return '';
 }
 
+export async function callBackendAiProxy(
+  prompt: string,
+  model: string = 'gemini-2.5-flash',
+  config?: any,
+  fundId: string = 'redwood-cap'
+): Promise<string | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const token = await getClientAuthToken(fundId);
+    const res = await fetch(`/api/funds/${fundId}/ai/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ prompt, model, config })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.text) return data.text;
+    }
+  } catch (_err) {
+    // Offline or backend unreachable
+  }
+  return null;
+}
+
 export const STATE_AREA_CODES: Record<string, string> = {
   'AL': '205', 'AK': '907', 'AZ': '602', 'AR': '501', 'CA': '916', 'CO': '303',
   'CT': '203', 'DE': '302', 'FL': '813', 'GA': '404', 'HI': '808', 'ID': '208',
@@ -722,6 +749,10 @@ export const generateOutreachLetter = async (
   `;
 
   try {
+    const proxyText = await callBackendAiProxy(prompt, model, { responseMimeType: "application/json" }, lead.fundId || 'redwood-cap');
+    if (proxyText) {
+      return JSON.parse(proxyText);
+    }
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
@@ -921,6 +952,10 @@ export const generateLOIDocument = async (
   `;
 
   try {
+    const proxyText = await callBackendAiProxy(prompt, model, { responseMimeType: "application/json" }, lead.fundId || 'redwood-cap');
+    if (proxyText) {
+      return JSON.parse(proxyText);
+    }
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
@@ -1082,6 +1117,11 @@ export const scanDigitalHealthSignals = async (lead: Lead): Promise<DigitalHealt
   `;
 
   try {
+    const proxyText = await callBackendAiProxy(prompt, model, { tools: [{ googleSearch: {} }] }, lead.fundId || 'redwood-cap');
+    if (proxyText) {
+      const jsonMatch = proxyText.match(/\{[\s\S]*\}/);
+      return jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(proxyText);
+    }
     const response = await ai.models.generateContent({
       model,
       contents: prompt,

@@ -31,9 +31,13 @@ import { fastMcpServer } from '../../server/mcp/fastMcpServer';
 import { soc2AndDrEngine } from '../../server/compliance/soc2AndDrEngine';
 import { formatStatusLabel } from '../components/common/DesignSystem';
 import { createSampleDemoLeads } from '../data/sampleDemoLeads';
+import { ArchiveLeadModal } from '../components/modals/ArchiveLeadModal';
+import { ICMemoDetailModal } from '../components/modals/ICMemoDetailModal';
+import { LOIGeneratorModal } from '../components/modals/LOIGeneratorModal';
+import { FinancialDocParserModal } from '../components/modals/FinancialDocParserModal';
 import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
-import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel, auditCimWithArgon } from '../services/geminiService';
+import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel, auditCimWithArgon, callBackendAiProxy } from '../services/geminiService';
 import { generateRegistryBatch } from '../services/registryIngestionService';
 import { extractCleanDomain, getTradeFacilityBadge, resolveFacilityImagery } from '../utils/facilityImageResolver';
 import { RecursiveSemanticChunker, BM25SparseIndex, DenseVectorIndex, EnterpriseHybridRAGRetriever, EnterpriseDocument } from '../utils/ragEngine';
@@ -2655,6 +2659,140 @@ test('Sprint 8: SOC 2 Trust Services Criteria Pre-Audit & Cryptographic Disaster
     assert.ok(restoreResult.rtoMs > 0 && restoreResult.rtoMs < 5000);
   });
 });
+
+test('End-to-End Control Plane HTTP Routes & Extracted Modal Components', async (t) => {
+  const associateToken = generateSignedJWT({ uid: 'assoc-1', role: 'associate', fundId: 'redwood-cap' });
+  const partnerToken = generateSignedJWT({ uid: 'partner-1', role: 'partner', fundId: 'redwood-cap' });
+
+  async function dispatchRoute(method: string, urlPath: string, options: { headers?: Record<string, string>; body?: any } = {}) {
+    const methodLower = method.toLowerCase();
+    for (const layer of (app as any)._router.stack) {
+      if (layer.route) {
+        const routePath = layer.route.path;
+        const regexPattern = routePath.replace(/:([a-zA-Z0-9_]+)/g, '(?<$1>[^/]+)');
+        const match = urlPath.match(new RegExp(`^${regexPattern}$`));
+        if (match && layer.route.methods[methodLower]) {
+          const req: any = {
+            method,
+            url: urlPath,
+            headers: { ...(options.headers || {}) },
+            params: { ...(match.groups || {}) },
+            body: options.body || {}
+          };
+          let statusCode = 200;
+          let responseData: any = null;
+          const res: any = {
+            statusCode: 200,
+            status(code: number) {
+              statusCode = code;
+              this.statusCode = code;
+              return this;
+            },
+            json(data: any) {
+              responseData = data;
+              return this;
+            },
+            send(data: any) {
+              responseData = data;
+              return this;
+            },
+            setHeader() {},
+            getHeader() {}
+          };
+
+          for (const handlerLayer of layer.route.stack) {
+            let nextCalled = false;
+            let nextErr: any = null;
+            await handlerLayer.handle(req, res, (err?: any) => {
+              nextCalled = true;
+              nextErr = err;
+            });
+            if (responseData !== null || (!nextCalled && !nextErr)) {
+              break;
+            }
+          }
+          return { status: statusCode, data: responseData };
+        }
+      }
+    }
+    throw new Error(`Route not found: ${method} ${urlPath}`);
+  }
+
+  await t.test('verifies extracted modal components and AI proxy helper exports', async () => {
+    assert.equal(typeof ArchiveLeadModal, 'function');
+    assert.equal(typeof ICMemoDetailModal, 'function');
+    assert.equal(typeof LOIGeneratorModal, 'function');
+    assert.equal(typeof FinancialDocParserModal, 'function');
+    assert.equal(typeof callBackendAiProxy, 'function');
+    const offlineRes = await callBackendAiProxy('test prompt');
+    assert.equal(offlineRes, null);
+  });
+
+  await t.test('serves Outbox Status & Drain HTTP endpoints with tenant isolation', async () => {
+    const statusRes = await dispatchRoute('GET', '/api/funds/redwood-cap/outbox/status', {
+      headers: { authorization: `Bearer ${associateToken}` }
+    });
+    assert.equal(statusRes.status, 200);
+    assert.equal(statusRes.data.fundId, 'redwood-cap');
+
+    const drainRes = await dispatchRoute('POST', '/api/funds/redwood-cap/outbox/drain', {
+      headers: { authorization: `Bearer ${associateToken}` }
+    });
+    assert.equal(drainRes.status, 200);
+    assert.equal(drainRes.data.status, 'SUCCESS');
+  });
+
+  await t.test('serves FastMCP tools list and JSON-RPC 2.0 endpoint over HTTP', async () => {
+    const toolsRes = await dispatchRoute('GET', '/api/funds/redwood-cap/mcp/tools', {
+      headers: { authorization: `Bearer ${associateToken}` }
+    });
+    assert.equal(toolsRes.status, 200);
+    assert.equal(toolsRes.data.tools.length, 4);
+
+    const rpcRes = await dispatchRoute('POST', '/api/funds/redwood-cap/mcp/rpc', {
+      headers: { authorization: `Bearer ${associateToken}` },
+      body: {
+        jsonrpc: '2.0',
+        id: 'http-rpc-1',
+        method: 'tools/call',
+        params: {
+          name: 'verify_audit_ledger_integrity',
+          arguments: { fundId: 'redwood-cap' }
+        }
+      }
+    });
+    assert.equal(rpcRes.status, 200);
+    assert.equal(rpcRes.data.result.isError, false);
+  });
+
+  await t.test('enforces RBAC on DR Snapshot/Restore HTTP routes while allowing SOC 2 report read', async () => {
+    const soc2Res = await dispatchRoute('GET', '/api/funds/redwood-cap/compliance/soc2', {
+      headers: { authorization: `Bearer ${associateToken}` }
+    });
+    assert.equal(soc2Res.status, 200);
+    assert.equal(soc2Res.data.readinessScore, 100);
+
+    // Associate should be blocked from triggering DR Snapshot (requires partner or admin)
+    const forbiddenDr = await dispatchRoute('POST', '/api/funds/redwood-cap/compliance/dr/snapshot', {
+      headers: { authorization: `Bearer ${associateToken}` }
+    });
+    assert.equal(forbiddenDr.status, 403);
+
+    // Partner should succeed in creating and restoring DR Snapshot
+    const partnerDrSnap = await dispatchRoute('POST', '/api/funds/redwood-cap/compliance/dr/snapshot', {
+      headers: { authorization: `Bearer ${partnerToken}` }
+    });
+    assert.equal(partnerDrSnap.status, 201);
+    assert.ok(partnerDrSnap.data.sha256Digest);
+
+    const partnerDrRestore = await dispatchRoute('POST', '/api/funds/redwood-cap/compliance/dr/restore', {
+      headers: { authorization: `Bearer ${partnerToken}` }
+    });
+    assert.equal(partnerDrRestore.status, 200);
+    assert.equal(partnerDrRestore.data.digestVerified, true);
+  });
+});
+
 
 
 

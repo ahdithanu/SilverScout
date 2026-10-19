@@ -96,6 +96,10 @@ import {
 import { ListingAggregatorCard } from './components/ingestion/ListingAggregatorCard';
 import { InboundSellerPortalModal } from './components/modals/InboundSellerPortalModal';
 import { BillingSubscriptionModal } from './components/modals/BillingSubscriptionModal';
+import { ArchiveLeadModal } from './components/modals/ArchiveLeadModal';
+import { ICMemoDetailModal } from './components/modals/ICMemoDetailModal';
+import { LOIGeneratorModal } from './components/modals/LOIGeneratorModal';
+import { FinancialDocParserModal } from './components/modals/FinancialDocParserModal';
 import { SubscriptionTier, SUBSCRIPTION_PLANS } from './utils/billing';
 import { FacilityImage } from './components/common/FacilityImage';
 import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
@@ -5497,67 +5501,15 @@ export default function App() {
       </AnimatePresence>
 
       {/* Archive Reason Modal */}
-      <AnimatePresence>
-        {archiveModalLead && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-label="Archive Target Lead">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-zinc-100"
-            >
-              <h3 className="text-xl font-bold text-zinc-900">Archive Target Lead</h3>
-              <p className="text-xs text-zinc-500 mt-1">Select a reason for archiving {archiveModalLead.name}.</p>
-              
-              <div className="mt-6 space-y-3">
-                {['Not a fit', 'Contacted Unsuccessfully', 'Inactive', 'Other'].map((reason) => (
-                  <label key={reason} className="flex items-center justify-between p-3 rounded-xl border border-zinc-200 cursor-pointer hover:bg-zinc-50 transition-colors">
-                    <span className="text-sm font-medium">{reason}</span>
-                    <input 
-                      type="radio" 
-                      name="archiveReason" 
-                      value={reason}
-                      checked={archiveReason === reason}
-                      onChange={(e) => setArchiveReason(e.target.value)}
-                      className="h-4 w-4 border-zinc-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                  </label>
-                ))}
-              </div>
-
-              <div className="mt-6">
-                <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                  Additional Context (Optional)
-                </label>
-                <textarea
-                  value={archiveNotes}
-                  onChange={(e) => setArchiveNotes(e.target.value)}
-                  placeholder="Add more details about why this lead is being archived..."
-                  className="w-full rounded-xl border border-zinc-200 p-4 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                  rows={3}
-                />
-              </div>
-            
-              <div className="mt-8 flex gap-3">
-                <Button 
-                  variant="ghost" 
-                  className="flex-1"
-                  onClick={() => setArchiveModalLead(null)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  variant="danger" 
-                  className="flex-1"
-                  onClick={confirmArchive}
-                >
-                  Confirm Archive
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ArchiveLeadModal
+        lead={archiveModalLead}
+        archiveReason={archiveReason}
+        setArchiveReason={setArchiveReason}
+        archiveNotes={archiveNotes}
+        setArchiveNotes={setArchiveNotes}
+        onClose={() => setArchiveModalLead(null)}
+        onConfirm={confirmArchive}
+      />
 
       {/* LP & Lender Executive Pitch Deck Modal */}
       <LenderPitchDeckModal lead={pitchDeckLead} onClose={() => setPitchDeckLead(null)} />
@@ -5631,498 +5583,55 @@ export default function App() {
       )}
 
       {/* 1-Page Investment Committee (IC) Deal Teaser Modal */}
-      <AnimatePresence>
-        {icMemoModalLead && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto print:p-0 print:bg-white print:static" role="dialog" aria-modal="true" aria-label="Investment Committee Deal Teaser">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-4xl rounded-2xl bg-white p-8 shadow-2xl border border-zinc-200 my-8 print:shadow-none print:border-none print:max-w-none print:p-0 print:my-0"
-            >
-              {/* Header Actions (Hidden when printing) */}
-              <div className="flex items-center justify-between border-b border-zinc-200 pb-4 mb-6 print:hidden">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-                    <FileText className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <h3 className="font-extrabold text-lg text-zinc-900">Investment Committee (IC) Deal Teaser</h3>
-                    <p className="text-xs text-zinc-500">Confidential M&A Acquisition Brief • {icMemoModalLead.name}</p>
-                  </div>
-                </div>
+      <ICMemoDetailModal
+        lead={icMemoModalLead}
+        icMemoData={icMemoData}
+        isGeneratingICMemo={isGeneratingICMemo}
+        copiedField={copiedField}
+        onCopyText={handleCopyText}
+        onClose={() => {
+          setIcMemoModalLead(null);
+          setIcMemoData(null);
+        }}
+      />
 
-                <div className="flex items-center gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="gap-1 text-xs"
-                    onClick={() => window.print()}
-                  >
-                    <Printer className="h-3.5 w-3.5 text-zinc-600" />
-                    Print / Export PDF
-                  </Button>
+      {/* Non-Binding LOI Generator Modal */}
+      <LOIGeneratorModal
+        lead={loiModalLead}
+        loiTerms={loiTerms}
+        setLoiTerms={setLoiTerms}
+        generatedLOIDoc={generatedLOIDoc}
+        setGeneratedLOIDoc={setGeneratedLOIDoc}
+        isGeneratingLOI={isGeneratingLOI}
+        copiedField={copiedField}
+        onCopyText={handleCopyText}
+        onGenerateLOI={handleGenerateLOIDoc}
+        onSaveAndMoveToLOI={async (leadId) => {
+          await updateLeadStatus(leadId, 'in_loi');
+          setLoiModalLead(null);
+          setGeneratedLOIDoc(null);
+        }}
+        onClose={() => {
+          setLoiModalLead(null);
+          setGeneratedLOIDoc(null);
+        }}
+      />
 
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="gap-1 text-xs"
-                    onClick={() => {
-                      if (!icMemoData) return;
-                      const markdown = `# INVESTMENT COMMITTEE MEMORANDUM\n**TARGET:** ${icMemoModalLead.name}\n**INDUSTRY:** ${icMemoModalLead.industry}\n**VALUATION EST:** $${(icMemoModalLead.valuationEstimate || 0).toLocaleString()}\n\n## DEAL SUMMARY\n${icMemoData.dealSummary}\n\n## EXECUTIVE SUMMARY\n${icMemoData.executiveSummary}\n\n## INVESTMENT HIGHLIGHTS\n${icMemoData.investmentHighlights.map(h => `- ${h}`).join('\n')}\n\n## KEY RISKS & MITIGATION\n${icMemoData.keyRisks.map(r => `- **Risk:** ${r.risk}\n  **Mitigation:** ${r.mitigation}`).join('\n')}`;
-                      navigator.clipboard.writeText(markdown);
-                      handleCopyText(markdown, 'icmemo');
-                    }}
-                  >
-                    <Copy className="h-3.5 w-3.5 text-zinc-600" />
-                    {copiedField === 'icmemo' ? 'Copied Markdown!' : 'Copy Markdown'}
-                  </Button>
-
-                  <button 
-                    onClick={() => {
-                      setIcMemoModalLead(null);
-                      setIcMemoData(null);
-                    }}
-                    className="text-zinc-400 hover:text-zinc-700 text-sm font-bold px-2"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-
-              {isGeneratingICMemo ? (
-                <div className="py-20 text-center space-y-4">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
-                    <Clock className="h-6 w-6 animate-spin" />
-                  </div>
-                  <h4 className="font-bold text-zinc-900 text-lg">Synthesizing Investment Committee Memo...</h4>
-                  <p className="text-xs text-zinc-500 max-w-md mx-auto leading-relaxed">
-                    Gemini is structuring financial models, valuation multiples, risk mitigations, and transaction terms for <strong>{icMemoModalLead.name}</strong>.
-                  </p>
-                </div>
-              ) : icMemoData ? (
-                <div className="space-y-6 text-zinc-800 text-xs leading-relaxed font-sans">
-                  
-                  {/* Top Confidential Banner */}
-                  <div className="flex items-center justify-between border-b-2 border-zinc-900 pb-3">
-                    <div>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">STRICTLY CONFIDENTIAL</span>
-                      <h1 className="text-2xl font-black text-zinc-900 mt-1">{icMemoModalLead.name}</h1>
-                      <p className="text-xs text-zinc-500 font-medium">{icMemoModalLead.industry} • {icMemoModalLead.location} • Owner: {icMemoModalLead.agentName || 'Individual Owner'}</p>
-                    </div>
-
-                    <div className="text-right space-y-1">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Exit Propensity</p>
-                      <div className="inline-flex items-center gap-1 bg-zinc-900 text-white font-black px-3 py-1 rounded-xl text-base">
-                        <span>{icMemoModalLead.exitPropensityScore || '?'}/10</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Summary Callout Box */}
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
-                    <h5 className="font-bold text-emerald-900 text-xs uppercase tracking-wider mb-1">Deal Overview</h5>
-                    <p className="text-xs text-emerald-950 font-medium leading-relaxed">{icMemoData.dealSummary}</p>
-                  </div>
-
-                  {/* Executive Rationale */}
-                  <div className="space-y-2">
-                    <h5 className="font-bold text-zinc-900 uppercase tracking-wider text-[11px] border-b border-zinc-200 pb-1">1. Investment Rationale & Thesis</h5>
-                    <p className="text-xs text-zinc-700 leading-relaxed">{icMemoData.executiveSummary}</p>
-                  </div>
-
-                  {/* Financial & Valuation Grid */}
-                  <div className="grid grid-cols-4 gap-3 border border-zinc-200 rounded-xl p-4 bg-zinc-50/50">
-                    <div>
-                      <p className="text-[9px] uppercase font-bold text-zinc-400">Est. Revenue</p>
-                      <p className="text-sm font-black text-zinc-900">{icMemoData.financialOverview.estimatedRevenue}</p>
-                    </div>
-                    <div>
-                      <p className="text-[9px] uppercase font-bold text-zinc-400">Est. EBITDA</p>
-                      <p className="text-sm font-black text-zinc-900">{icMemoData.financialOverview.estimatedEbitda}</p>
-                    </div>
-                    <div>
-                      <p className="text-[9px] uppercase font-bold text-zinc-400">Implied Multiple</p>
-                      <p className="text-sm font-black text-emerald-600">{icMemoData.financialOverview.impliedMultiple}</p>
-                    </div>
-                    <div>
-                      <p className="text-[9px] uppercase font-bold text-zinc-400">Valuation Range</p>
-                      <p className="text-sm font-black text-zinc-900">{icMemoData.financialOverview.valuationRange}</p>
-                    </div>
-                  </div>
-
-                  {/* Highlights & Risks 2-Column Split */}
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <h5 className="font-bold text-zinc-900 uppercase tracking-wider text-[11px] border-b border-zinc-200 pb-1">2. Value Creation & Key Highlights</h5>
-                      <ul className="space-y-1.5 list-disc pl-4 text-xs text-zinc-700">
-                        {icMemoData.investmentHighlights.map((hl, i) => (
-                          <li key={i}>{hl}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="space-y-2">
-                      <h5 className="font-bold text-zinc-900 uppercase tracking-wider text-[11px] border-b border-zinc-200 pb-1">3. Red Flag Risks & Mitigations</h5>
-                      <div className="space-y-2">
-                        {icMemoData.keyRisks.map((rk, i) => (
-                          <div key={i} className="rounded-lg border border-red-100 bg-red-50/30 p-2 text-xs">
-                            <p className="font-bold text-red-900">Risk: {rk.risk}</p>
-                            <p className="text-zinc-600 text-[11px]">Mitigation: {rk.mitigation}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Proposed Transaction Structure */}
-                  <div className="space-y-2 pt-2 border-t border-zinc-200">
-                    <h5 className="font-bold text-zinc-900 uppercase tracking-wider text-[11px]">4. Proposed Transaction Terms</h5>
-                    <div className="grid grid-cols-4 gap-3 bg-zinc-900 text-white rounded-xl p-3 text-center">
-                      <div>
-                        <p className="text-[9px] uppercase text-zinc-400">Offer Price</p>
-                        <p className="text-xs font-bold text-emerald-400">{icMemoData.dealStructure.recommendedPrice}</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase text-zinc-400">Upfront Cash</p>
-                        <p className="text-xs font-bold text-white">{icMemoData.dealStructure.upfrontCash}</p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] uppercase text-zinc-400">Seller Note</p>
-                        <p className="text-xs font-bold text-white">{icMemoData.dealStructure.sellerNote}</p>
-                      </div>
-              <div>
-                        <p className="text-[9px] uppercase text-zinc-400">Earnout Terms</p>
-                        <p className="text-xs font-bold text-amber-400">{icMemoData.dealStructure.earnout}</p>
-                      </div>
-                    </div>
-                    {/* Immediate Next Steps */}
-                    <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2 border-t border-zinc-100">
-                      <span className="font-bold text-zinc-700">Immediate Action Steps:</span>
-                      <span>{icMemoData.nextSteps.join(' • ')}</span>
-                    </div>
-
-                  </div>
-                </div>
-              ) : null}
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* Non-Binding LOI Generator Modal */}
-        <AnimatePresence>
-          {loiModalLead && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto print:p-0 print:bg-white print:static" role="dialog" aria-modal="true" aria-label="M&A Acquisition Letter of Intent Generator">
-              <motion.div 
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="relative w-full max-w-4xl rounded-2xl bg-white p-8 shadow-2xl border border-zinc-200 my-8 print:shadow-none print:border-none print:max-w-none print:p-0 print:my-0"
-              >
-                <div className="flex items-center justify-between border-b border-zinc-200 pb-4 mb-6 print:hidden">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
-                      <FileCheck2 className="h-4 w-4" />
-                    </span>
-                    <div>
-                      <h3 className="font-extrabold text-lg text-zinc-900">M&A Acquisition Letter of Intent (LOI) Generator</h3>
-                      <p className="text-xs text-zinc-500">Draft Non-Binding Acquisition Offer • {loiModalLead.name}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {generatedLOIDoc && (
-                      <>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="gap-1 text-xs"
-                          onClick={() => window.print()}
-                        >
-                          <Printer className="h-3.5 w-3.5 text-zinc-600" />
-                          Print / Export PDF
-                        </Button>
-
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="gap-1 text-xs"
-                          onClick={() => {
-                            navigator.clipboard.writeText(generatedLOIDoc.loiBody);
-                            handleCopyText(generatedLOIDoc.loiBody, 'loi');
-                          }}
-                        >
-                          <Copy className="h-3.5 w-3.5 text-zinc-600" />
-                          {copiedField === 'loi' ? 'Copied LOI!' : 'Copy LOI Text'}
-                        </Button>
-                      </>
-                    )}
-
-                    <button 
-                      onClick={() => {
-                        setLoiModalLead(null);
-                        setGeneratedLOIDoc(null);
-                      }}
-                      className="text-zinc-400 hover:text-zinc-700 text-sm font-bold px-2"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-
-                {!generatedLOIDoc ? (
-                  <div className="space-y-6">
-                    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 text-xs text-amber-900 leading-relaxed">
-                      <p className="font-bold">Configure Acquisition Offer Terms for {loiModalLead.name}</p>
-                      <p className="text-amber-800/80">Customize purchase price, upfront cash split, seller note financing, earnouts, and exclusivity period before generating the formal non-binding LOI document.</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
-                      <div className="space-y-1">
-                        <label className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Total Purchase Price ($)</label>
-                        <input 
-                          type="number" 
-                          value={loiTerms.purchasePrice}
-                          onChange={(e) => setLoiTerms(prev => ({ ...prev, purchasePrice: parseFloat(e.target.value) || 0 }))}
-                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 px-3 text-sm font-bold focus:border-amber-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Upfront Cash ($)</label>
-                        <input 
-                          type="number" 
-                          value={loiTerms.upfrontCash}
-                          onChange={(e) => setLoiTerms(prev => ({ ...prev, upfrontCash: parseFloat(e.target.value) || 0 }))}
-                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 px-3 text-sm font-bold focus:border-amber-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Seller Note ($)</label>
-                        <input 
-                          type="number" 
-                          value={loiTerms.sellerNote}
-                          onChange={(e) => setLoiTerms(prev => ({ ...prev, sellerNote: parseFloat(e.target.value) || 0 }))}
-                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 px-3 text-sm font-bold focus:border-amber-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Contingent Earnout ($)</label>
-                        <input 
-                          type="number" 
-                          value={loiTerms.earnoutAmount}
-                          onChange={(e) => setLoiTerms(prev => ({ ...prev, earnoutAmount: parseFloat(e.target.value) || 0 }))}
-                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 px-3 text-sm font-bold focus:border-amber-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Rollover Equity (%)</label>
-                        <input 
-                          type="number" 
-                          value={loiTerms.rolloverEquityPercent}
-                          onChange={(e) => setLoiTerms(prev => ({ ...prev, rolloverEquityPercent: parseFloat(e.target.value) || 0 }))}
-                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 px-3 text-sm font-bold focus:border-amber-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Working Capital Peg ($)</label>
-                        <input 
-                          type="number" 
-                          value={loiTerms.workingCapitalPeg}
-                          onChange={(e) => setLoiTerms(prev => ({ ...prev, workingCapitalPeg: parseFloat(e.target.value) || 0 }))}
-                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 px-3 text-sm font-bold focus:border-amber-500 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <Button 
-                      onClick={handleGenerateLOIDoc}
-                      disabled={isGeneratingLOI}
-                      className="w-full py-4 gap-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm"
-                    >
-                      {isGeneratingLOI ? (
-                        <>
-                          <Clock className="h-4 w-4 animate-spin" />
-                          Generating Legal LOI Document with Gemini...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4 w-4" />
-                          Draft Formal Non-Binding LOI Document
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
-                      <h2 className="text-xl font-bold text-zinc-900">{generatedLOIDoc.title}</h2>
-                      <Button 
-                        variant="outline" 
-                        size="xs" 
-                        onClick={() => setGeneratedLOIDoc(null)}
-                        className="text-xs text-amber-700 border-amber-200"
-                      >
-                        Edit Offer Terms
-                      </Button>
-                    </div>
-
-                    <div className="prose prose-sm max-w-none rounded-xl border border-zinc-200 bg-zinc-50/50 p-6 text-zinc-800 font-mono text-xs leading-relaxed max-h-[500px] overflow-y-auto">
-                      <ReactMarkdown>{generatedLOIDoc.loiBody}</ReactMarkdown>
-                    </div>
-
-                    <div className="flex gap-3 pt-2">
-                      <Button 
-                        variant="primary" 
-                        className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white gap-2 font-bold"
-                        onClick={async () => {
-                          await updateLeadStatus(loiModalLead.id, 'in_loi');
-                          setLoiModalLead(null);
-                          setGeneratedLOIDoc(null);
-                        }}
-                      >
-                        <FileCheck2 className="h-4 w-4" />
-                        Save LOI & Move Target to "Under LOI" Stage
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        {/* P&L / Tax Return Financial Document Parser Modal */}
-        <AnimatePresence>
-          {showFinancialParserModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label="AI Quality of Earnings & P&L Document Parser">
-              <motion.div 
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="relative w-full max-w-2xl rounded-2xl bg-white p-8 shadow-2xl border border-zinc-200"
-              >
-                <div className="flex items-center justify-between border-b border-zinc-200 pb-4 mb-6">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-                      <FileUp className="h-4 w-4" />
-                    </span>
-                    <div>
-                      <h3 className="font-extrabold text-lg text-zinc-900">AI Quality of Earnings & P&L Document Parser</h3>
-                      <p className="text-xs text-zinc-500">Extract Revenue, EBITDA & SDE Add-backs from PDF/Image P&Ls</p>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={() => {
-                      setShowFinancialParserModal(false);
-                      setExtractedDocData(null);
-                    }}
-                    className="text-zinc-400 hover:text-zinc-700 text-sm font-bold px-2"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {!extractedDocData ? (
-                  <div className="space-y-6">
-                    <div className="rounded-2xl border-2 border-dashed border-zinc-300 bg-zinc-50/50 p-8 text-center hover:border-blue-500 transition-colors cursor-pointer">
-                      <input 
-                        type="file" 
-                        accept="image/*,application/pdf,text/plain"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleParseFinancialDoc(file);
-                        }}
-                        className="hidden" 
-                        id="financial-doc-upload"
-                      />
-                      <label htmlFor="financial-doc-upload" className="cursor-pointer space-y-3 block">
-                        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
-                          <UploadCloud className="h-6 w-6" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-zinc-800">Click or drag P&L Statement / Tax Return PDF</p>
-                          <p className="text-xs text-zinc-400 mt-1">Supports PDF, PNG, JPG, WEBP, or TXT financial reports</p>
-                        </div>
-                      </label>
-                    </div>
-
-                    {isParsingDoc && (
-                      <div className="flex items-center justify-center gap-3 p-4 bg-blue-50 text-blue-700 rounded-xl text-xs font-semibold">
-                        <Clock className="h-4 w-4 animate-spin" />
-                        Auditing financial statement with Gemini Multimodal AI...
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 p-3 rounded-xl">
-                      <span className="text-xs font-bold text-emerald-900">Multimodal Gemini Extraction Complete</span>
-                      <span className="text-[10px] font-black uppercase text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
-                        {extractedDocData.confidenceScore}% Confidence
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3 text-center">
-                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-200">
-                        <span className="text-[9px] font-bold text-zinc-400 uppercase">Extracted Revenue</span>
-                        <p className="text-base font-black text-zinc-900">${extractedDocData.revenue.toLocaleString()}</p>
-                      </div>
-                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-200">
-                        <span className="text-[9px] font-bold text-zinc-400 uppercase">Extracted EBITDA</span>
-                        <p className="text-base font-black text-emerald-600">${extractedDocData.ebitda.toLocaleString()}</p>
-                      </div>
-                      <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-200">
-                        <span className="text-[9px] font-bold text-zinc-400 uppercase">Profit Margin</span>
-                        <p className="text-base font-black text-zinc-900">{extractedDocData.profitMargin}%</p>
-                      </div>
-                    </div>
-
-                    {extractedDocData.suggestedAddBacks && extractedDocData.suggestedAddBacks.length > 0 && (
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Identified Discretionary SDE Add-Backs</label>
-                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                          {extractedDocData.suggestedAddBacks.map((ab, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-zinc-50 p-2.5 rounded-lg text-xs border border-zinc-200">
-                              <div>
-                                <span className="font-bold text-zinc-800">{ab.name}</span>
-                                <p className="text-[10px] text-zinc-500">{ab.rationale}</p>
-                              </div>
-                              <span className="font-extrabold text-emerald-600">+${ab.amount.toLocaleString()}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex gap-3">
-                      <Button 
-                        variant="outline" 
-                        className="flex-1"
-                        onClick={() => setExtractedDocData(null)}
-                      >
-                        Upload Different File
-                      </Button>
-                      <Button 
-                        variant="primary"
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold"
-                        onClick={handleApplyExtractedFinancials}
-                      >
-                        Apply Extracted Financials to Target
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-      </div>
-    );
-  }
+      {/* P&L / Tax Return Financial Document Parser Modal with Gemini 4 Argon QofE Guard */}
+      <FinancialDocParserModal
+        isOpen={showFinancialParserModal}
+        targetName={selectedLead?.name}
+        fundId={profile?.fundId || 'redwood-cap'}
+        extractedDocData={extractedDocData}
+        setExtractedDocData={setExtractedDocData}
+        isParsingDoc={isParsingDoc}
+        onParseFile={handleParseFinancialDoc}
+        onApplyExtractedFinancials={handleApplyExtractedFinancials}
+        onClose={() => {
+          setShowFinancialParserModal(false);
+          setExtractedDocData(null);
+        }}
+      />
+    </div>
+  );
+}
