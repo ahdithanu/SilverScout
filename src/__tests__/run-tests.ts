@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
 
 import { canApproveLOI, canTriggerBatchOutreach, canEditValuationParameters } from '../utils/rbac';
 import { calculateLBOMetrics } from '../utils/lboMath';
@@ -21,6 +23,10 @@ import { applySecurityHeaders, authenticateTenant, generateSignedJWT } from '../
 import { PersistentStorage } from '../../server/persistentStorage';
 import { executeAutonomousFeedSweep, app } from '../../server/index';
 import { createCheckoutSession, createCustomerPortalSession, verifyStripeWebhookSignature, handleStripeWebhookEvent } from '../../server/billing';
+import { dbManager } from '../../server/db/index';
+import { EnterpriseVectorStore, vectorStore } from '../../server/db/vectorStore';
+import { ssoManager } from '../../server/sso/index';
+import { scimManager } from '../../server/sso/scim';
 import { SUBSCRIPTION_PLANS } from '../utils/billing';
 import { calculateSyndicationWaterfall } from '../utils/waterfall';
 import { getTradeCoreServices, getPhoneAreaCode, getStateCode, enrichBusinessSpecificIntel, auditCimWithArgon } from '../services/geminiService';
@@ -2209,6 +2215,243 @@ test('Authenticated Backend AI Gateway & Gemini 4 Argon Pipeline', async (t) => 
     assert.ok(result.audit.auditSummary.includes('California Commercial Controls'));
     assert.equal(result.audit.modelUsed, 'gemini-4-argon');
     assert.equal(result.guardCheck.valid, true);
+  });
+});
+
+test('Cloud Postgres / Spanner & Enterprise RAG Vector Store', async (t) => {
+  await t.test('validates SQL migration schema file existence and DDL integrity', () => {
+    const migrationPath = path.resolve(process.cwd(), 'server/db/migrations/001_initial_schema.sql');
+    assert.ok(fs.existsSync(migrationPath), 'Migration 001_initial_schema.sql must exist');
+
+    const ddl = fs.readFileSync(migrationPath, 'utf8');
+    assert.ok(ddl.includes('CREATE TABLE IF NOT EXISTS funds'));
+    assert.ok(ddl.includes('CREATE TABLE IF NOT EXISTS users'));
+    assert.ok(ddl.includes('CREATE TABLE IF NOT EXISTS leads'));
+    assert.ok(ddl.includes('CREATE TABLE IF NOT EXISTS deals'));
+    assert.ok(ddl.includes('CREATE TABLE IF NOT EXISTS rag_chunks'));
+    assert.ok(ddl.includes('allowed_roles VARCHAR(32)[]'));
+  });
+
+  await t.test('runs migration runner successfully and reports database status', async () => {
+    const migrationRes = await dbManager.runMigrations();
+    assert.equal(migrationRes.success, true);
+    assert.ok(migrationRes.applied.length > 0);
+
+    const status = dbManager.getStatus();
+    assert.ok(status.engine);
+    assert.ok(Array.isArray(status.migrationsApplied));
+  });
+
+  await t.test('performs multi-tenant scoped lead persistence and retrieval', async () => {
+    const testLead: Lead = {
+      id: 'db-test-lead-1',
+      fundId: 'redwood-cap',
+      name: 'Redwood Valley Commercial Piping',
+      industry: 'Commercial Plumbing',
+      location: 'Santa Rosa, CA',
+      registrationDate: '1996-05-10',
+      revenue: 5500000,
+      ebitda: 1200000,
+      profitMargin: 21.8,
+      status: 'qualified',
+      isCorporateAgent: false,
+      permitDrop: 42,
+      dealSourceChannel: 'OFF_MARKET_SCOUT',
+      dataFingerprint: 'hash-test-redwood-1',
+      createdAt: new Date().toISOString()
+    };
+
+    const saved = await dbManager.upsertLead('redwood-cap', testLead);
+    assert.equal(saved.id, 'db-test-lead-1');
+    assert.equal(saved.fundId, 'redwood-cap');
+
+    const fundLeads = await dbManager.getLeads('redwood-cap');
+    assert.ok(fundLeads.some(l => l.id === 'db-test-lead-1'));
+
+    // Tenant isolation: querying fund-b must not return redwood-cap leads
+    const fundBLeads = await dbManager.getLeads('fund-b');
+    assert.equal(fundBLeads.some(l => l.id === 'db-test-lead-1'), false);
+  });
+
+  await t.test('EnterpriseVectorStore calculates cosine similarity accurately', () => {
+    const vecA = [1, 0, 0];
+    const vecIdentical = [1, 0, 0];
+    const vecOrthogonal = [0, 1, 0];
+    const vecOpposite = [-1, 0, 0];
+
+    assert.equal(EnterpriseVectorStore.cosineSimilarity(vecA, vecIdentical), 1.0);
+    assert.equal(EnterpriseVectorStore.cosineSimilarity(vecA, vecOrthogonal), 0.0);
+    assert.equal(EnterpriseVectorStore.cosineSimilarity(vecA, vecOpposite), -1.0);
+  });
+
+  await t.test('EnterpriseVectorStore indexes chunks and enforces multi-tenant fund isolation', async () => {
+    vectorStore.clear();
+
+    await vectorStore.insertChunks('redwood-cap', [
+      {
+        chunkId: 'chunk-redwood-1',
+        docId: 'doc-1',
+        chunkIndex: 0,
+        content: 'Redwood Capital confidential acquisition target financial model.',
+        tokenCount: 120,
+        allowedRoles: ['partner', 'associate'],
+        embedding: [0.9, 0.1, 0.0]
+      }
+    ]);
+
+    await vectorStore.insertChunks('fund-b', [
+      {
+        chunkId: 'chunk-fundb-1',
+        docId: 'doc-2',
+        chunkIndex: 0,
+        content: 'Fund B proprietary HVAC target in Nevada.',
+        tokenCount: 95,
+        allowedRoles: ['partner'],
+        embedding: [0.9, 0.1, 0.0]
+      }
+    ]);
+
+    // Query from redwood-cap
+    const resultsRedwood = await vectorStore.searchSimilar('redwood-cap', 'partner', [0.9, 0.1, 0.0], 5);
+    assert.equal(resultsRedwood.length, 1);
+    assert.equal(resultsRedwood[0].chunkId, 'chunk-redwood-1');
+
+    // Fund B query
+    const resultsFundB = await vectorStore.searchSimilar('fund-b', 'partner', [0.9, 0.1, 0.0], 5);
+    assert.equal(resultsFundB.length, 1);
+    assert.equal(resultsFundB[0].chunkId, 'chunk-fundb-1');
+  });
+
+  await t.test('EnterpriseVectorStore enforces Zero-Trust ACL role restrictions', async () => {
+    vectorStore.clear();
+
+    await vectorStore.insertChunks('redwood-cap', [
+      {
+        chunkId: 'partner-only-chunk',
+        docId: 'cim-deal-1',
+        chunkIndex: 0,
+        content: 'Confidential founder compensation and unannounced succession timeline.',
+        tokenCount: 80,
+        allowedRoles: ['partner'], // Only partners and admins
+        embedding: [0.8, 0.2, 0.1]
+      },
+      {
+        chunkId: 'analyst-accessible-chunk',
+        docId: 'cim-deal-1',
+        chunkIndex: 1,
+        content: 'Historical 3-year revenue and customer service fleet details.',
+        tokenCount: 150,
+        allowedRoles: ['analyst', 'associate', 'partner'],
+        embedding: [0.8, 0.2, 0.1]
+      }
+    ]);
+
+    // Analyst search: must only see analyst-accessible chunk
+    const analystResults = await vectorStore.searchSimilar('redwood-cap', 'analyst', [0.8, 0.2, 0.1], 5);
+    assert.equal(analystResults.length, 1);
+    assert.equal(analystResults[0].chunkId, 'analyst-accessible-chunk');
+
+    // Partner search: must see both
+    const partnerResults = await vectorStore.searchSimilar('redwood-cap', 'partner', [0.8, 0.2, 0.1], 5);
+    assert.equal(partnerResults.length, 2);
+
+    // Global admin search: must see all
+    const adminResults = await vectorStore.searchSimilar('redwood-cap', 'admin', [0.8, 0.2, 0.1], 5);
+    assert.equal(adminResults.length, 2);
+  });
+});
+
+test('Enterprise SSO (SAML/OIDC) & SCIM 2.0 Provisioning Engine', async (t) => {
+  await t.test('generates SSO authorization redirect URL with cryptographic CSRF state nonce', () => {
+    const auth = ssoManager.generateAuthorizeUrl('redwood-cap', 'okta', 'https://app.silverscout.ai/callback');
+    assert.ok(auth.url);
+    assert.ok(auth.state);
+    assert.ok(auth.url.includes('client_id='));
+    assert.ok(auth.url.includes(`state=${auth.state}`));
+  });
+
+  await t.test('exchanges valid SSO callback state for signed JWT session token and user identity', async () => {
+    const auth = ssoManager.generateAuthorizeUrl('redwood-cap', 'google', 'https://app.silverscout.ai/callback');
+    const result = await ssoManager.handleCallback(auth.state, 'mock_google_auth_code', {
+      email: 'm.partner@redwood-cap.com',
+      name: 'Michael Partner',
+      role: 'partner'
+    });
+
+    assert.ok(result.token);
+    assert.equal(result.user.email, 'm.partner@redwood-cap.com');
+    assert.equal(result.user.fundId, 'redwood-cap');
+    assert.equal(result.user.role, 'partner');
+    assert.equal(result.user.provider, 'google');
+  });
+
+  await t.test('rejects invalid or forged SSO callback state (CSRF defense)', async () => {
+    await assert.rejects(
+      async () => {
+        await ssoManager.handleCallback('forged_attacker_state_nonce', 'fake_code');
+      },
+      /CSRF protection failed/
+    );
+  });
+
+  await t.test('SCIM: rejects unauthorized requests missing SCIM bearer token (401)', () => {
+    assert.equal(scimManager.verifyAuthorization(''), false);
+    assert.equal(scimManager.verifyAuthorization('Bearer invalid-scim-token'), false);
+    assert.equal(scimManager.verifyAuthorization('Bearer scim-enterprise-zero-trust-secret-key-32ch'), true);
+  });
+
+  await t.test('SCIM: lists provisioned users in standard RFC 7644 format', () => {
+    const list = scimManager.listUsers('redwood-cap');
+    assert.ok(list.schemas.includes('urn:ietf:params:scim:api:messages:2.0:ListResponse'));
+    assert.ok(list.totalResults >= 2);
+    assert.ok(Array.isArray(list.Resources));
+  });
+
+  await t.test('SCIM: provisions new user and logs immutable audit ledger event (201)', () => {
+    const newUser = scimManager.createUser('redwood-cap', {
+      userName: 'new.analyst@redwood-cap.com',
+      name: { formatted: 'David Analyst', givenName: 'David', familyName: 'Analyst' },
+      roles: [{ value: 'analyst' }],
+      active: true
+    });
+
+    assert.ok(newUser.id);
+    assert.equal(newUser.userName, 'new.analyst@redwood-cap.com');
+    assert.equal(newUser.roles[0].value, 'analyst');
+    assert.equal(newUser.active, true);
+
+    const fetched = scimManager.getUser('redwood-cap', newUser.id);
+    assert.ok(fetched);
+    assert.equal(fetched.userName, 'new.analyst@redwood-cap.com');
+  });
+
+  await t.test('SCIM: updates user role and active state (200)', () => {
+    const user = scimManager.createUser('redwood-cap', {
+      userName: 'temp.user@redwood-cap.com',
+      roles: [{ value: 'analyst' }],
+      active: true
+    });
+
+    const updated = scimManager.updateUser('redwood-cap', user.id, {
+      active: false,
+      roles: [{ value: 'associate' }]
+    });
+
+    assert.equal(updated.active, false);
+    assert.equal(updated.roles[0].value, 'associate');
+  });
+
+  await t.test('SCIM: de-provisions user and logs audit event (204)', () => {
+    const user = scimManager.createUser('redwood-cap', {
+      userName: 'to.delete@redwood-cap.com',
+      roles: [{ value: 'analyst' }]
+    });
+
+    const deleted = scimManager.deleteUser('redwood-cap', user.id);
+    assert.equal(deleted, true);
+
+    const fetched = scimManager.getUser('redwood-cap', user.id);
+    assert.equal(fetched, null);
   });
 });
 

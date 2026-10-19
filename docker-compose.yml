@@ -14,7 +14,13 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - DATA_DIR=/app/data
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/silverscout
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - CISO_JWT_SECRET=${CISO_JWT_SECRET:-silver-scout-production-zero-trust-secret-key-32ch}
+      - SCIM_BEARER_TOKEN=${SCIM_BEARER_TOKEN:-scim-enterprise-zero-trust-secret-key-32ch}
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       # Persistent storage volume for leads, listings, audit ledger, and exports
       - silver_scout_data:/app/data
@@ -25,7 +31,29 @@ services:
       retries: 3
       start_period: 10s
 
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: silver-scout-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=silverscout
+    volumes:
+      - silver_scout_postgres:/var/lib/postgresql/data
+      - ./server/db/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d silverscout"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   # Named volume for persistent data storage across container restarts and updates
   silver_scout_data:
     name: silver_scout_data
+  # Named volume for persistent PostgreSQL & pgvector data
+  silver_scout_postgres:
+    name: silver_scout_postgres

@@ -33,6 +33,10 @@ import { PersistentStorage } from './persistentStorage';
 import { ContinuousIngestionScheduler } from '../src/utils/continuousIngestionScheduler';
 import { SAMPLE_MARKETPLACE_LISTINGS } from '../src/services/listingIngestionService';
 import { INITIAL_SEEDED_LEADS } from './seedData';
+import { dbManager } from './db/index';
+import { vectorStore } from './db/vectorStore';
+import { ssoManager } from './sso/index';
+import { scimManager } from './sso/scim';
 
 dotenv.config();
 
@@ -112,6 +116,160 @@ app.post('/api/auth/token', (req, res) => {
     email: email || `${uid || 'analyst-1'}@${fundId || 'redwood-cap'}.com`
   });
   res.json({ token, status: 'SUCCESS' });
+});
+
+// -----------------------------------------------------------------------------
+// ENTERPRISE CLOUD POSTGRES / SPANNER & VECTOR STORE STATUS
+// -----------------------------------------------------------------------------
+app.get('/api/database/status', (req, res) => {
+  const status = dbManager.getStatus();
+  res.json({
+    ...status,
+    vectorStoreChunks: vectorStore.getCount(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// -----------------------------------------------------------------------------
+// ENTERPRISE SSO (SAML 2.0 / OIDC) ENDPOINTS
+// -----------------------------------------------------------------------------
+app.get('/api/auth/sso/login', (req, res) => {
+  const fundId = (req.query.fundId as string) || 'redwood-cap';
+  const provider = ((req.query.provider as string) || 'okta') as any;
+  const redirectUri = (req.query.redirectUri as string) || `${req.protocol}://${req.get('host')}/api/auth/sso/callback`;
+
+  const { url, state } = ssoManager.generateAuthorizeUrl(fundId, provider, redirectUri);
+  res.json({ authorizeUrl: url, state, provider, fundId });
+});
+
+app.post('/api/auth/sso/callback', async (req, res) => {
+  const { state, code, email, role } = req.body || {};
+  if (!state) {
+    return res.status(400).json({ error: 'Missing required SSO state parameter' });
+  }
+
+  try {
+    const result = await ssoManager.handleCallback(state, code || 'auth_code_mock', { email, role });
+    res.json({
+      status: 'SUCCESS',
+      token: result.token,
+      user: result.user
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: 'SSO_AUTHENTICATION_FAILED', message: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// SCIM 2.0 PROTOCOL ENDPOINTS (RFC 7643 / RFC 7644)
+// -----------------------------------------------------------------------------
+function requireSCIMAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!scimManager.verifyAuthorization(authHeader)) {
+    return res.status(401).json({
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+      status: '401',
+      detail: 'Unauthorized: Invalid or missing SCIM bearer token'
+    });
+  }
+  next();
+}
+
+app.get('/scim/v2/Users', requireSCIMAuth, (req, res) => {
+  const fundId = (req.query.fundId as string) || 'redwood-cap';
+  const startIndex = parseInt(req.query.startIndex as string) || 1;
+  const count = parseInt(req.query.count as string) || 50;
+  const result = scimManager.listUsers(fundId, startIndex, count);
+  res.json(result);
+});
+
+app.get('/scim/v2/Users/:id', requireSCIMAuth, (req, res) => {
+  const fundId = (req.query.fundId as string) || 'redwood-cap';
+  const user = scimManager.getUser(fundId, req.params.id);
+  if (!user) {
+    return res.status(404).json({
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+      status: '404',
+      detail: `User ${req.params.id} not found`
+    });
+  }
+  res.json(user);
+});
+
+app.post('/scim/v2/Users', requireSCIMAuth, (req, res) => {
+  const fundId = (req.query.fundId as string) || 'redwood-cap';
+  try {
+    const user = scimManager.createUser(fundId, req.body);
+    res.status(201).json(user);
+  } catch (err: any) {
+    res.status(400).json({
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+      status: '400',
+      detail: err.message
+    });
+  }
+});
+
+app.put('/scim/v2/Users/:id', requireSCIMAuth, (req, res) => {
+  const fundId = (req.query.fundId as string) || 'redwood-cap';
+  try {
+    const updated = scimManager.updateUser(fundId, req.params.id, req.body);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(404).json({
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+      status: '404',
+      detail: err.message
+    });
+  }
+});
+
+app.patch('/scim/v2/Users/:id', requireSCIMAuth, (req, res) => {
+  const fundId = (req.query.fundId as string) || 'redwood-cap';
+  try {
+    const updated = scimManager.updateUser(fundId, req.params.id, req.body);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(404).json({
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+      status: '404',
+      detail: err.message
+    });
+  }
+});
+
+app.delete('/scim/v2/Users/:id', requireSCIMAuth, (req, res) => {
+  const fundId = (req.query.fundId as string) || 'redwood-cap';
+  const success = scimManager.deleteUser(fundId, req.params.id);
+  if (!success) {
+    return res.status(404).json({
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+      status: '404',
+      detail: `User ${req.params.id} not found`
+    });
+  }
+  res.status(204).send();
+});
+
+app.get('/scim/v2/ServiceProviderConfig', (req, res) => {
+  res.json({
+    schemas: ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
+    documentationUri: 'https://docs.silverscout.ai/scim',
+    patch: { supported: true },
+    bulk: { supported: false },
+    filter: { supported: true, maxResults: 100 },
+    changePassword: { supported: false },
+    sort: { supported: true },
+    etag: { supported: false },
+    authenticationSchemes: [
+      {
+        name: 'OAuth Bearer Token',
+        description: 'Authentication Scheme using the OAuth Bearer Token Standard',
+        specUri: 'http://www.rfc-editor.org/info/rfc6750',
+        type: 'oauthbearertoken'
+      }
+    ]
+  });
 });
 
 app.get('/api/funds/:fundId/config', authenticateTenant, (req, res) => {

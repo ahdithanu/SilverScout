@@ -49,25 +49,48 @@ export class AuditProvenanceLedger {
   }
 
   public recordEvent(
-    fundId: string,
-    dealId: string,
-    action: string,
-    actorId: string,
-    actorRole: string,
-    payload: Record<string, any>
+    fundIdOrOpts: string | { fundId: string; dealId?: string; targetId?: string; action: string; actorId: string; actorRole?: string; payload?: Record<string, any> },
+    dealId?: string,
+    action?: string,
+    actorId?: string,
+    actorRole?: string,
+    payload?: Record<string, any>
   ): AuditLedgerBlock {
+    let fId: string;
+    let dId: string;
+    let act: string;
+    let aId: string;
+    let aRole: string;
+    let pLoad: Record<string, any>;
+
+    if (typeof fundIdOrOpts === 'object') {
+      fId = fundIdOrOpts.fundId;
+      dId = fundIdOrOpts.dealId || fundIdOrOpts.targetId || 'global';
+      act = fundIdOrOpts.action;
+      aId = fundIdOrOpts.actorId;
+      aRole = fundIdOrOpts.actorRole || 'system';
+      pLoad = fundIdOrOpts.payload || {};
+    } else {
+      fId = fundIdOrOpts;
+      dId = dealId || 'global';
+      act = action || 'UNKNOWN_ACTION';
+      aId = actorId || 'system';
+      aRole = actorRole || 'system';
+      pLoad = payload || {};
+    }
+
     const previousBlock = this.chain[this.chain.length - 1];
     const blockIndex = previousBlock.blockIndex + 1;
     const timestamp = new Date().toISOString();
-    const payloadHash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    const payloadHash = crypto.createHash('sha256').update(JSON.stringify(pLoad)).digest('hex');
     
     const currentHash = this.computeHash(
       blockIndex,
       previousBlock.currentHash,
-      action,
-      fundId,
-      dealId,
-      actorId,
+      act,
+      fId,
+      dId,
+      aId,
       timestamp,
       payloadHash
     );
@@ -76,11 +99,11 @@ export class AuditProvenanceLedger {
       blockIndex,
       previousHash: previousBlock.currentHash,
       currentHash,
-      fundId,
-      dealId,
-      action,
-      actorId,
-      actorRole,
+      fundId: fId,
+      dealId: dId,
+      action: act,
+      actorId: aId,
+      actorRole: aRole,
       payloadHash,
       timestamp
     };
