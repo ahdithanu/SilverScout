@@ -1,5 +1,5 @@
 ---
-name: extension-to-functions-codebase
+name: extension_to_functions_codebase
 description: Skill for converting an installed Firebase Extension (or extension source) to a standalone Cloud Functions for Firebase codebase or publishable npm package, including upgrading triggers from V1 to V2 and configuring lifecycle hooks and declarative security
 ---
 
