@@ -39,6 +39,7 @@ import { ssoManager } from './sso/index';
 import { scimManager } from './sso/scim';
 import { fastMcpServer } from './mcp/fastMcpServer';
 import { soc2AndDrEngine } from './compliance/soc2AndDrEngine';
+import { liveIntegrations } from './integrations/liveProviders';
 
 dotenv.config();
 
@@ -1311,6 +1312,119 @@ app.post(
     }
   }
 );
+
+// -----------------------------------------------------------------------------
+// COMMERCIAL LIVE INTEGRATIONS: SHOVELS.AI PERMITS, APOLLO/HUNTER & LOB DIRECT MAIL
+// -----------------------------------------------------------------------------
+app.get('/api/funds/:fundId/integrations/status', authenticateTenant, (req, res) => {
+  res.json({
+    fundId: req.params.fundId,
+    providers: liveIntegrations.getProviderStatus(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.post('/api/funds/:fundId/leads/:leadId/enrich-live', authenticateTenant, async (req, res) => {
+  const { fundId, leadId } = req.params;
+  const lead = req.body.lead || {};
+  const companyName = lead.name || req.body.companyName || 'Target Business';
+  const location = lead.location || req.body.location || 'Sacramento, CA';
+  const industry = lead.industry || req.body.industry || 'HVAC';
+
+  const [permitResult, contactResult] = await Promise.all([
+    liveIntegrations.fetchShovelsPermitHistory({
+      companyName,
+      location,
+      industry,
+      existingPermit2023_2025: lead.permitVolume2023_2025,
+      existingPermit2026: lead.permitVolume2026
+    }),
+    liveIntegrations.enrichB2BOwnerContact({
+      companyName,
+      ownerName: lead.agentName,
+      domain: lead.website,
+      location,
+      existingEmail: lead.email,
+      existingPhone: lead.phone
+    })
+  ]);
+
+  const enrichedLead = {
+    ...lead,
+    id: leadId,
+    fundId,
+    permitVolume2023_2025: permitResult.permitVolume2023_2025,
+    permitVolume2026: permitResult.permitVolume2026,
+    permitDrop: permitResult.permitDrop,
+    email: contactResult.verifiedEmail,
+    phone: contactResult.directDialPhone,
+    agentName: contactResult.ownerFullName,
+    permitVerifiedByApi: permitResult.provenance.tier === 'VERIFIED_API',
+    contactVerifiedByApi: contactResult.provenance.tier === 'VERIFIED_API',
+    updatedAt: new Date().toISOString()
+  };
+
+  const provenanceManifest = liveIntegrations.classifyLeadDataProvenance(enrichedLead);
+
+  auditLedger.recordEvent(
+    fundId,
+    leadId,
+    'LIVE_EXTERNAL_ENRICHMENT_EXECUTED',
+    (req as any).user?.uid || 'analyst',
+    (req as any).user?.role || 'associate',
+    {
+      companyName,
+      permitTier: permitResult.provenance.tier,
+      contactTier: contactResult.provenance.tier
+    }
+  );
+
+  res.json({
+    status: 'SUCCESS',
+    lead: enrichedLead,
+    permitEnrichment: permitResult,
+    contactEnrichment: contactResult,
+    provenanceManifest
+  });
+});
+
+app.post('/api/funds/:fundId/outreach/direct-mail', authenticateTenant, async (req, res) => {
+  const { fundId } = req.params;
+  const {
+    leadId,
+    recipientName,
+    companyName,
+    streetAddress,
+    cityStateZip,
+    senderName,
+    senderCompany,
+    senderAddress,
+    letterBodyText
+  } = req.body || {};
+
+  if (!companyName || !streetAddress || !letterBodyText) {
+    return res.status(400).json({ error: 'Missing required fields: companyName, streetAddress, letterBodyText' });
+  }
+
+  const receipt = await liveIntegrations.dispatchPhysicalLetterViaLob({
+    fundId,
+    leadId: leadId || `lead-${Date.now()}`,
+    actorId: (req as any).user?.uid || 'partner-user',
+    recipientName: recipientName || 'Business Owner & Principal',
+    companyName,
+    streetAddress,
+    cityStateZip: cityStateZip || 'Sacramento, CA 95814',
+    senderName: senderName || 'Managing Partner',
+    senderCompany: senderCompany || 'SilverScout Capital Partners, LP',
+    senderAddress: senderAddress || '100 Montgomery Street, Suite 2400, San Francisco, CA 94104',
+    letterBodyText
+  });
+
+  res.status(201).json({
+    status: 'DISPATCHED',
+    receipt
+  });
+});
 
 // Serve frontend static build if present (e.g. inside Docker container)
 const distPath = path.resolve(process.cwd(), 'dist');

@@ -12,9 +12,11 @@ import {
   Phone,
   Mail,
   Calendar,
-  Sparkles
+  Sparkles,
+  Truck
 } from 'lucide-react';
 import { Lead, ActivityLog } from '../../types';
+import { getClientAuthToken } from '../../services/geminiService';
 
 interface DirectMailLetterModalProps {
   isOpen: boolean;
@@ -113,6 +115,8 @@ export const DirectMailLetterModal: React.FC<DirectMailLetterModalProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [isLogging, setIsLogging] = useState<boolean>(false);
   const [loggedSuccess, setLoggedSuccess] = useState<boolean>(false);
+  const [isDispatchingLob, setIsDispatchingLob] = useState<boolean>(false);
+  const [lobReceipt, setLobReceipt] = useState<any>(null);
 
   React.useEffect(() => {
     if (lead) {
@@ -195,6 +199,53 @@ Confidential Email: ${senderEmail}`;
       console.error('Failed to log direct mail touchpoint:', err);
     } finally {
       setIsLogging(false);
+    }
+  };
+
+  const handleDispatchViaLobApi = async () => {
+    setIsDispatchingLob(true);
+    try {
+      const fundId = lead.fundId || 'redwood-cap';
+      const token = await getClientAuthToken(fundId);
+      const res = await fetch(`/api/funds/${fundId}/outreach/direct-mail`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          leadId: lead.id,
+          recipientName,
+          companyName: lead.name,
+          streetAddress,
+          cityStateZip,
+          senderName,
+          senderCompany: fundName,
+          senderAddress: fundAddress,
+          letterBodyText: getFullLetterText()
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setLobReceipt(data.receipt);
+
+        const touchpoint: Partial<ActivityLog> = {
+          id: `activity_lob_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          action: `Outreach: USPS First-Class Dispatched via Lob.com (${data.receipt?.trackingNumber})`,
+          channel: 'direct_mail',
+          outcome: 'sent_teaser',
+          contactPerson: `${recipientName} (${lead.name})`,
+          notes: `Dispatched physical 8.5x11 Golden Letter via Lob.com USPS First-Class to ${streetAddress}, ${cityStateZip}. Tracking: ${data.receipt?.trackingNumber} | Est. Delivery: ${data.receipt?.expectedDeliveryDate}.`,
+          details: `Lob Letter ID: ${data.receipt?.lobLetterId}`
+        };
+        await onLogTouchpoint(touchpoint, true);
+      }
+    } catch (err) {
+      console.error('Lob direct mail dispatch error:', err);
+    } finally {
+      setIsDispatchingLob(false);
     }
   };
 
@@ -282,6 +333,22 @@ Confidential Email: ${senderEmail}`;
 
               <button
                 type="button"
+                onClick={handleDispatchViaLobApi}
+                disabled={isDispatchingLob || Boolean(lobReceipt)}
+                className="flex items-center gap-1.5 rounded-xl bg-amber-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-amber-700 disabled:opacity-60 transition-colors"
+              >
+                <Truck className="h-3.5 w-3.5" />
+                <span>
+                  {lobReceipt
+                    ? `USPS Dispatched (${lobReceipt.trackingNumber.slice(-6)})`
+                    : isDispatchingLob
+                    ? 'Dispatching via Lob...'
+                    : 'Mail via Lob.com ($1.25 USPS)'}
+                </span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleLogMailedTouchpoint}
                 disabled={isLogging || loggedSuccess}
                 className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 transition-colors"
@@ -300,6 +367,22 @@ Confidential Email: ${senderEmail}`;
               </button>
             </div>
           </div>
+
+          {lobReceipt && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-950 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>
+                  <strong>USPS First-Class Letter Queued via Lob.com ({lobReceipt.mode}):</strong> Tracking{' '}
+                  <code className="font-mono font-bold text-emerald-800">{lobReceipt.trackingNumber}</code> • Est. Delivery:{' '}
+                  <strong>{lobReceipt.expectedDeliveryDate}</strong>
+                </span>
+              </div>
+              <span className="font-mono text-[10px] bg-white border border-emerald-200 px-2 py-0.5 rounded font-bold text-emerald-700">
+                Outbox ID: {lobReceipt.outboxId}
+              </span>
+            </div>
+          )}
 
           {/* Quick Recipient Address Customizer */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-zinc-200/60 text-xs">

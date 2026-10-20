@@ -102,6 +102,7 @@ import { LOIGeneratorModal } from './components/modals/LOIGeneratorModal';
 import { FinancialDocParserModal } from './components/modals/FinancialDocParserModal';
 import { SubscriptionTier, SUBSCRIPTION_PLANS } from './utils/billing';
 import { FacilityImage } from './components/common/FacilityImage';
+import { DataProvenanceBanner } from './components/common/DataProvenanceBanner';
 import { AgentTelemetrySweeper } from './components/intelligence/AgentTelemetrySweeper';
 import { AgentEvalRunnerLab } from './components/intelligence/AgentEvalRunnerLab';
 
@@ -654,31 +655,36 @@ export default function App() {
 
   const handleApplyExtractedFinancials = async () => {
     if (!selectedLead || !extractedDocData) return;
-    try {
-      await updateDoc(doc(db, 'leads', selectedLead.id), {
-        revenue: extractedDocData.revenue,
-        ebitda: extractedDocData.ebitda,
-        profitMargin: extractedDocData.profitMargin,
-        updatedAt: new Date().toISOString()
-      });
+    const updatedFields: any = {
+      revenue: extractedDocData.revenue,
+      ebitda: extractedDocData.ebitda,
+      profitMargin: extractedDocData.profitMargin,
+      documentVerified: true,
+      updatedAt: new Date().toISOString()
+    };
 
-      if (extractedDocData.suggestedAddBacks && extractedDocData.suggestedAddBacks.length > 0) {
-        setAddBacksList(prev => [
-          ...prev,
-          ...extractedDocData.suggestedAddBacks.map((ab, idx) => ({
-            id: `doc-${Date.now()}-${idx}`,
-            name: ab.name,
-            amount: ab.amount
-          }))
-        ]);
-      }
+    setSelectedLead(prev => (prev ? { ...prev, ...updatedFields } : prev));
+    setLeads(prev => prev.map(l => (l.id === selectedLead.id ? { ...l, ...updatedFields } : l)));
 
-      setExtractedDocData(null);
-      setShowFinancialParserModal(false);
-    } catch (err: any) {
-      console.error("Apply financials error:", err);
-      setGlobalError("Failed to update financials in database: " + err.message);
+    if (extractedDocData.suggestedAddBacks && extractedDocData.suggestedAddBacks.length > 0) {
+      setAddBacksList(prev => [
+        ...prev,
+        ...extractedDocData.suggestedAddBacks.map((ab, idx) => ({
+          id: `doc-${Date.now()}-${idx}`,
+          name: ab.name,
+          amount: ab.amount
+        }))
+      ]);
     }
+
+    try {
+      await updateDoc(doc(db, 'leads', selectedLead.id), updatedFields);
+    } catch (_err) {
+      // Local or backend-persisted lead without Firestore doc
+    }
+
+    setExtractedDocData(null);
+    setShowFinancialParserModal(false);
   };
 
   const handleScanDigitalHealth = async (lead: Lead) => {
@@ -4567,13 +4573,38 @@ export default function App() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <Card className="bg-zinc-50">
-                    <p className="text-[10px] uppercase tracking-widest text-zinc-400">Valuation Est.</p>
-                    <p className="text-xl font-bold">${(selectedLead.valuationEstimate || 0).toLocaleString()}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] uppercase tracking-widest text-zinc-400">Valuation Est.</p>
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[9px] font-bold text-amber-800">
+                        {(selectedLead as any).documentVerified ? 'VERIFIED P&L' : 'BENCHMARK EST.'}
+                      </span>
+                    </div>
+                    <p className="text-xl font-bold mt-1">${(selectedLead.valuationEstimate || 0).toLocaleString()}</p>
                   </Card>
                   <Card className="bg-zinc-50">
-                    <p className="text-[10px] uppercase tracking-widest text-zinc-400">Permit Drop</p>
-                    <p className="text-xl font-bold text-red-600">{selectedLead.permitDrop}%</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] uppercase tracking-widest text-zinc-400">Permit Drop</p>
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[9px] font-bold text-amber-800">
+                        {(selectedLead as any).permitVerifiedByApi ? 'SHOVELS API' : 'COHORT EST.'}
+                      </span>
+                    </div>
+                    <p className="text-xl font-bold text-red-600 mt-1">{selectedLead.permitDrop}%</p>
                   </Card>
+                </div>
+
+                <div className="mt-4">
+                  <DataProvenanceBanner
+                    lead={selectedLead}
+                    fundId={profile?.fundId || 'redwood-cap'}
+                    hasAuthoritativeFinancials={Boolean((selectedLead as any).documentVerified)}
+                    onOpenFinancialParser={() => setShowFinancialParserModal(true)}
+                    onLeadEnriched={(enrichedFields) => {
+                      setSelectedLead((prev) => (prev ? { ...prev, ...enrichedFields } : prev));
+                      setLeads((prev) =>
+                        prev.map((l) => (l.id === selectedLead.id ? { ...l, ...enrichedFields } : l))
+                      );
+                    }}
+                  />
                 </div>
 
                 {/* Business Profile & Operations Intelligence */}

@@ -29,7 +29,9 @@ import { ssoManager } from '../../server/sso/index';
 import { scimManager } from '../../server/sso/scim';
 import { fastMcpServer } from '../../server/mcp/fastMcpServer';
 import { soc2AndDrEngine } from '../../server/compliance/soc2AndDrEngine';
+import { liveIntegrations } from '../../server/integrations/liveProviders';
 import { formatStatusLabel } from '../components/common/DesignSystem';
+import { DataProvenanceBanner } from '../components/common/DataProvenanceBanner';
 import { createSampleDemoLeads } from '../data/sampleDemoLeads';
 import { ArchiveLeadModal } from '../components/modals/ArchiveLeadModal';
 import { ICMemoDetailModal } from '../components/modals/ICMemoDetailModal';
@@ -2790,6 +2792,67 @@ test('End-to-End Control Plane HTTP Routes & Extracted Modal Components', async 
     });
     assert.equal(partnerDrRestore.status, 200);
     assert.equal(partnerDrRestore.data.digestVerified, true);
+  });
+
+  await t.test('verifies Commercial Live Integrations (Shovels.ai, Apollo/Hunter, Lob.com Direct Mail & Provenance)', async () => {
+    assert.equal(typeof DataProvenanceBanner, 'function');
+
+    const statusRes = await dispatchRoute('GET', '/api/funds/redwood-cap/integrations/status', {
+      headers: { authorization: `Bearer ${associateToken}` }
+    });
+    assert.equal(statusRes.status, 200);
+    assert.ok(statusRes.data.providers.shovelsPermitApi);
+    assert.ok(statusRes.data.providers.apolloContactApi);
+    assert.ok(statusRes.data.providers.lobDirectMailApi);
+
+    const enrichRes = await dispatchRoute('POST', '/api/funds/redwood-cap/leads/lead-commercial-1/enrich-live', {
+      headers: { authorization: `Bearer ${associateToken}` },
+      body: {
+        lead: {
+          id: 'lead-commercial-1',
+          name: 'Delta Mechanical HVAC',
+          location: 'Sacramento, CA',
+          industry: 'HVAC',
+          permitVolume2023_2025: 50,
+          permitVolume2026: 25
+        }
+      }
+    });
+    assert.equal(enrichRes.status, 200);
+    assert.equal(enrichRes.data.status, 'SUCCESS');
+    assert.equal(enrichRes.data.lead.permitDrop, 50);
+    assert.equal(Array.isArray(enrichRes.data.provenanceManifest), true);
+    assert.equal(enrichRes.data.provenanceManifest.length, 4);
+
+    // Before P&L upload, financialMetrics should be explicitly labeled BENCHMARK_ESTIMATE
+    const finPillarBefore = enrichRes.data.provenanceManifest.find((p: any) => p.field === 'financialMetrics');
+    assert.equal(finPillarBefore.tier, 'BENCHMARK_ESTIMATE');
+
+    // After P&L upload (documentVerified: true), financialMetrics upgrades to VERIFIED_DOCUMENT
+    const verifiedManifest = liveIntegrations.classifyLeadDataProvenance({
+      ...enrichRes.data.lead,
+      documentVerified: true
+    });
+    const finPillarAfter = verifiedManifest.find((p: any) => p.field === 'financialMetrics');
+    assert.equal(finPillarAfter?.tier, 'VERIFIED_DOCUMENT');
+
+    // Dispatch physical USPS First-Class letter via Lob.com endpoint
+    const lobRes = await dispatchRoute('POST', '/api/funds/redwood-cap/outreach/direct-mail', {
+      headers: { authorization: `Bearer ${partnerToken}` },
+      body: {
+        leadId: 'lead-commercial-1',
+        recipientName: 'Robert Vance',
+        companyName: 'Delta Mechanical HVAC',
+        streetAddress: '400 Industrial Pkwy',
+        cityStateZip: 'Sacramento, CA 95814',
+        letterBodyText: 'Dear Robert Vance, Confidential acquisition inquiry for Delta Mechanical HVAC.'
+      }
+    });
+    assert.equal(lobRes.status, 201);
+    assert.equal(lobRes.data.status, 'DISPATCHED');
+    assert.equal(lobRes.data.receipt.carrier, 'USPS');
+    assert.ok(lobRes.data.receipt.trackingNumber);
+    assert.ok(lobRes.data.receipt.outboxId);
   });
 });
 
